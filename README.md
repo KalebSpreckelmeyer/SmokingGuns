@@ -1,55 +1,41 @@
-# CommonLibF4 Plugin Template
+# Smoking Guns F4SE
 
-This is a basic plugin template using CommonLibF4.
+**Smoking Guns F4SE** is the native runtime component for **Smoking Guns**, a weapon-smoke framework for Fallout 4.
 
-### Requirements
-* [XMake](https://xmake.io) [3.0.0+]
-* C++23 Compiler (MSVC or Clang-CL)
+The plugin provides runtime support for identifying weapons and their installed components, gathering the information needed by the smoke system, and assigning the appropriate Smoking Guns attachments automatically.
 
-## Getting Started
-```bat
-git clone --recurse-submodules https://github.com/libxse/commonlibf4-template
-cd commonlibf4-template
-```
+## Purpose
 
-### Build
-To build the project, run the following command:
-```bat
-xmake build
-```
+Smoking Guns uses modular NIF effects and weapon behavior graphs to add persistent, state-based smoke effects to firearms.
 
-> ***Note:*** *This will generate a `build/windows/` directory in the **project's root directory** with the build output.*
+Because Fallout 4 weapons cannot reliably and automatically attach new attachments natively this plugin will handle that aspect of integration in addition to other supporting features for the Smoking Guns mod. 
 
-### Build Output (Optional)
-If you want to redirect the build output, set one of the following environment variables:
+## Features
 
-- Path to a Mod Manager mods folder: `XSE_FO4_MODS_PATH`
+* Inspects equipped weapon and attachment information at runtime.
+* Determines which Smoking Guns support attachments are applicable to a weapon configuration.
+* Applies the appropriate smoke-system attachments automatically.
+* Provides native functionality to the accompanying Papyrus scripts.
+* Designed to minimize the amount of weapon-specific Creation Kit wiring required by Smoking Guns.
+* Built with multi-runtime Fallout 4 compatibility in mind.
 
-  or
+## Runtime Support
 
-- Path to a Fallout 4 install folder: `XSE_FO4_GAME_PATH`
+The project is being developed around CommonLibF4 with support planned for the mainstream Fallout 4 runtimes, including:
 
-### Project Generation (Optional)
-If you use Visual Studio, run the following command:
-```bat
-xmake project -k vsxmake
-```
+* Fallout 4 1.10.163 / F4SE 0.6.23
+* Fallout 4 1.10.980
+* Fallout 4 1.10.984
+* Current 1.11.x runtimes
 
-> ***Note:*** *This will generate a `vsxmakeXXXX/` directory in the **project's root directory** using the latest version of Visual Studio installed on the system.*
+Fallout 4 VR is not currently targeted.
 
-**Alternatively**, if you do not use Visual Studio, you can generate a `compile_commands.json` file for use with a laguage server like clangd in any code editor that supports it, like vscode:
-```bat
-xmake project -k compile_commands
-```
+## Status
 
-> ***Note:*** *You must have a language server extension installed to make use of this file. I recommend `clangd`. Do not have more than one installed at a time as they will conflict with each other. I also recommend installing the `xmake` extension if available to make building the project easier.*
+**Work in progress.**
 
-### Upgrading Packages (Optional)
-If you want to upgrade the project's dependencies, run the following commands:
-```bat
-xmake repo --update
-xmake require --upgrade
-```
+The plugin is being developed alongside the main Smoking Guns framework, and its API and implementation may change substantially before release.
 
-## Documentation
-Please refer to the [Wiki](../../wiki/Home) for more advanced topics.
+## Related Project
+
+Smoking Guns is a modular visual-effects project that adds accumulating and dissipating weapon smoke to Fallout 4 firearms, with effects tied to individual weapon components and animation events.
