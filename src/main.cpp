@@ -1,4 +1,6 @@
 #include "ConfigManager.h"
+#include "GraphManager.h"
+#include "SmokeCalculation.h"
 #include <variant>
 
 namespace Papyrus
@@ -16,8 +18,12 @@ namespace Papyrus
 			return false;
 		}
 
-		// The Papyrus event can report non-weapons, so reject them here too.
-		auto* eventWeapon = a_form->As<RE::TESObjectWEAP>();
+		//
+		// Step 1:
+		// Ignore equip events that aren't weapons.
+		//
+		auto* eventWeapon =
+			a_form->As<RE::TESObjectWEAP>();
 
 		if (!eventWeapon) {
 			REX::DEBUG(
@@ -27,28 +33,41 @@ namespace Papyrus
 			return false;
 		}
 
-		auto* player = RE::PlayerCharacter::GetSingleton();
+		//
+		// Step 2:
+		// Acquire the player.
+		//
+		auto* player =
+			RE::PlayerCharacter::GetSingleton();
 
 		if (!player) {
-			REX::ERROR("[Smoking Guns] Could not acquire PlayerCharacter");
+			REX::ERROR(
+				"[Smoking Guns] Could not acquire PlayerCharacter");
+
 			return false;
 		}
 
-		// Fallout's first/current weapon equip index.
+		//
+		// Step 3:
+		// Resolve the weapon instance that is actually equipped.
+		//
 		RE::BGSEquipIndex equipIndex{};
 		equipIndex.index = 0;
 
-		// This is an output object. GetEquippedItem will fill it with
-		// the object and instance data that are actually equipped.
-		RE::BGSObjectInstance equipped{ nullptr, nullptr };
+		RE::BGSObjectInstance equipped{
+			nullptr,
+			nullptr
+		};
 
-		auto* result = player->GetEquippedItem(
-			&equipped,
-			equipIndex);
+		auto* result =
+			player->GetEquippedItem(
+				&equipped,
+				equipIndex);
 
 		if (!result || !equipped.object) {
 			REX::WARN(
-				"[Smoking Guns] Equip event {:08X}, but GetEquippedItem returned nothing",
+				"[Smoking Guns] Equip event {:08X}, "
+				"but GetEquippedItem returned nothing",
 				eventWeapon->GetFormID());
 
 			return false;
@@ -64,32 +83,108 @@ namespace Papyrus
 			return false;
 		}
 
-		auto* instanceData = equipped.instanceData.get();
+		//
+		// This is useful for spotting equip-timing problems later.
+		//
+		if (equippedWeapon->GetFormID() !=
+			eventWeapon->GetFormID()) {
 
-		if (!instanceData) {
 			REX::WARN(
-				"[Smoking Guns] Equipped weapon {:08X} had no instance data",
+				"[Smoking Guns] Equip event/current weapon mismatch: "
+				"event={:08X}, current={:08X}",
+				eventWeapon->GetFormID(),
+				equippedWeapon->GetFormID());
+		}
+
+		//
+		// Step 4:
+		// Check framework compatibility BEFORE doing ammo,
+		// weight, configuration or smoke calculation work.
+		//
+		const auto graphStatus =
+			SmokingGuns::GraphManager::DetectFramework(
+				player);
+
+		if (graphStatus.firstPersonFound) {
+			REX::INFO(
+				"[Smoking Guns] 1P SG graph detected: "
+				"SG_FrameworkVersion={}",
+				graphStatus.firstPersonVersion);
+		}
+		else {
+			REX::DEBUG(
+				"[Smoking Guns] No SG framework variable found "
+				"on 1P weapon graph");
+		}
+
+		if (graphStatus.thirdPersonFound) {
+			REX::INFO(
+				"[Smoking Guns] 3P SG graph detected: "
+				"SG_FrameworkVersion={}",
+				graphStatus.thirdPersonVersion);
+		}
+		else {
+			REX::DEBUG(
+				"[Smoking Guns] No SG framework variable found "
+				"on 3P weapon graph");
+		}
+
+		if (!graphStatus.IsCompatible()) {
+			REX::INFO(
+				"[Smoking Guns] Weapon {:08X} is not currently "
+				"recognized as Smoking Guns compatible",
 				equippedWeapon->GetFormID());
 
 			return false;
 		}
 
-		// We have already confirmed that equipped.object is a TESObjectWEAP,
-		// so its associated instance data should be TESObjectWEAP::InstanceData.
+		REX::INFO(
+			"[Smoking Guns] Weapon {:08X} is compatible with "
+			"Smoking Guns framework v1",
+			equippedWeapon->GetFormID());
+
+		//
+		// Step 5:
+		// Only supported weapons need their instance data inspected.
+		//
+		auto* instanceData =
+			equipped.instanceData.get();
+
+		if (!instanceData) {
+			REX::WARN(
+				"[Smoking Guns] Equipped weapon {:08X} "
+				"had no instance data",
+				equippedWeapon->GetFormID());
+
+			return false;
+		}
+
 		auto* weaponData =
-			static_cast<RE::TESObjectWEAP::InstanceData*>(instanceData);
+			static_cast<
+			RE::TESObjectWEAP::InstanceData*>(
+				instanceData);
 
-		auto* instanceAmmo = weaponData->ammo;
-
-		const float ammoImpulse =
-			SmokingGuns::ConfigManager::GetSingleton()
-			.GetAmmoImpulse(instanceAmmo);
+		//
+		// Step 6:
+		// Read the resolved ammo and look up its configured impulse.
+		//
+		auto* instanceAmmo =
+			weaponData->ammo;
 
 		const auto instanceAmmoFormID =
-			instanceAmmo ? instanceAmmo->GetFormID() : 0;
+			instanceAmmo ?
+			instanceAmmo->GetFormID() :
+			0;
+
+		const auto& config =
+			SmokingGuns::ConfigManager::GetSingleton();
+
+		const float ammoImpulse =
+			config.GetAmmoImpulse(
+				instanceAmmo);
 
 		REX::INFO(
-			"[Smoking Guns] Equipped weapon: "
+			"[Smoking Guns] Equipped weapon data: "
 			"base={:08X}, "
 			"weight={:.3f}, "
 			"ammo={:08X}, "
@@ -100,6 +195,93 @@ namespace Papyrus
 			instanceAmmoFormID,
 			ammoImpulse,
 			weaponData->ammoCapacity);
+
+		//
+		// Step 7:
+		// Calculate SmokeImpulse.
+		//
+		// We are deliberately NOT writing this to the graph yet.
+		//
+		const auto smokeCalculation =
+			SmokingGuns::SmokeCalculation::Calculate(
+				ammoImpulse,
+				weaponData->weight,
+				config.GetAmmoMult(),
+				config.GetWeightMult(),
+				config.GetOverallMult());
+
+		REX::INFO(
+			"[Smoking Guns] Smoke calculation: "
+			"AmmoImpulse={:.3f}, "
+			"Weight={:.3f}, "
+			"WeightImpulse={:.3f}, "
+			"AmmoComponent={:.3f}, "
+			"WeightComponent={:.3f}, "
+			"OverallMult={:.3f}, "
+			"SmokeImpulse={:.3f}",
+			ammoImpulse,
+			weaponData->weight,
+			smokeCalculation.weightImpulse,
+			smokeCalculation.ammoComponent,
+			smokeCalculation.weightComponent,
+			config.GetOverallMult(),
+			smokeCalculation.smokeImpulse);
+
+		const auto smokeWrite =
+			SmokingGuns::GraphManager::SetFloatVariable(
+				player,
+				"SmokeImpulse",
+				smokeCalculation.smokeImpulse);
+
+		REX::INFO(
+			"[Smoking Guns] SmokeImpulse={:.3f} "
+			"write result: 1P={}, 3P={}",
+			smokeCalculation.smokeImpulse,
+			smokeWrite.firstPersonWritten,
+			smokeWrite.thirdPersonWritten);
+
+		//
+		// Step 8:
+		// SmokeDecayImpulse already has settled semantics,
+		// so write it directly from the general config.
+		//
+		const float smokeDecayImpulse =
+			config.GetSmokeDecayImpulse();
+
+		const auto decayWrite =
+			SmokingGuns::GraphManager::SetFloatVariable(
+				player,
+				"SmokeDecayImpulse",
+				smokeDecayImpulse);
+
+		REX::INFO(
+			"[Smoking Guns] SmokeDecayImpulse={:.3f} "
+			"write result: 1P={}, 3P={}",
+			smokeDecayImpulse,
+			decayWrite.firstPersonWritten,
+			decayWrite.thirdPersonWritten);
+
+		//
+		// Temporary diagnostic readback.
+		//
+		float decay1P = 0.0f;
+		float decay3P = 0.0f;
+
+		const auto decayRead =
+			SmokingGuns::GraphManager::ReadFloatVariable(
+				player,
+				"SmokeDecayImpulse",
+				decay1P,
+				decay3P);
+
+		REX::INFO(
+			"[Smoking Guns] SmokeDecayImpulse readback: "
+			"1P={} value={:.3f}, "
+			"3P={} value={:.3f}",
+			decayRead.firstPersonWritten,
+			decay1P,
+			decayRead.thirdPersonWritten,
+			decay3P);
 
 		return true;
 	}
