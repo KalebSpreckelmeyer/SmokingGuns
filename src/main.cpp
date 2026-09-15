@@ -8,6 +8,20 @@ namespace Papyrus
 		return true;
 	}
 
+	bool ReportEquipped(std::monostate, RE::TESForm* a_form)
+	{
+		if (!a_form) {
+			REX::WARN("[Smoking Guns] ReportEquipped received a null form");
+			return false;
+		}
+
+		REX::INFO(
+			"[Smoking Guns] Equipped form received: {:08X}",
+			a_form->GetFormID());
+
+		return true;
+	}
+
 	bool RegisterFunctions(RE::BSScript::IVirtualMachine* a_vm)
 	{
 		if (!a_vm) {
@@ -15,12 +29,22 @@ namespace Papyrus
 			return false;
 		}
 
+		REX::INFO("[Smoking Guns] Binding Ping");
+
 		a_vm->BindNativeMethod(
 			"SGNative",
 			"Ping",
 			Ping);
 
+		REX::INFO("[Smoking Guns] Binding ReportEquipped");
+
+		a_vm->BindNativeMethod(
+			"SGNative",
+			"ReportEquipped",
+			ReportEquipped);
+
 		REX::INFO("[Smoking Guns] Papyrus functions registered");
+
 		return true;
 	}
 }
