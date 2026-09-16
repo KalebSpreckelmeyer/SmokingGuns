@@ -99,6 +99,24 @@ namespace SmokingGuns
 		return it->second;
 	}
 
+	const WeaponProfile* ConfigManager::GetWeaponProfile(
+		const RE::TESObjectWEAP* a_weapon) const
+	{
+		if (!a_weapon) {
+			return nullptr;
+		}
+
+		const auto it =
+			weaponProfiles.find(
+				a_weapon->GetFormID());
+
+		if (it == weaponProfiles.end()) {
+			return nullptr;
+		}
+
+		return &it->second;
+	}
+
 	void ConfigManager::Load()
 	{
 		REX::INFO("[Smoking Guns] Loading configuration");
@@ -108,9 +126,11 @@ namespace SmokingGuns
 
 	void ConfigManager::LoadGameData()
 	{
-		REX::INFO("[Smoking Guns] Game data ready - loading form-based configuration");
+		REX::INFO(
+			"[Smoking Guns] Game data ready - loading form-based configuration");
 
 		LoadAmmoConfigs();
+		LoadWeaponConfigs();
 	}
 
 	void ConfigManager::LoadGeneralConfig()
@@ -395,5 +415,323 @@ namespace SmokingGuns
 		REX::INFO(
 			"[Smoking Guns] Loaded {} ammo impulse entries",
 			loadedEntries);
+	}
+
+	void ConfigManager::LoadWeaponConfigs()
+	{
+		const std::filesystem::path weaponDirectory =
+			"Data/F4SE/Plugins/SmokingGuns/Weapons";
+
+		weaponProfiles.clear();
+
+		if (!std::filesystem::exists(weaponDirectory)) {
+			REX::WARN(
+				"[Smoking Guns] Weapon config directory not found: {}",
+				weaponDirectory.string());
+
+			return;
+		}
+
+		auto* dataHandler =
+			RE::TESDataHandler::GetSingleton();
+
+		if (!dataHandler) {
+			REX::ERROR(
+				"[Smoking Guns] TESDataHandler was unavailable "
+				"while loading weapon configs");
+
+			return;
+		}
+
+		std::size_t loadedProfiles = 0;
+
+		for (const auto& directoryEntry :
+			std::filesystem::directory_iterator(
+				weaponDirectory)) {
+
+			if (!directoryEntry.is_regular_file()) {
+				continue;
+			}
+
+			const auto& path =
+				directoryEntry.path();
+
+			if (path.extension() != ".ini") {
+				continue;
+			}
+
+			REX::INFO(
+				"[Smoking Guns] Loading weapon config: {}",
+				path.filename().string());
+
+			std::ifstream file(path);
+
+			if (!file.is_open()) {
+				REX::WARN(
+					"[Smoking Guns] Could not open weapon config: {}",
+					path.string());
+
+				continue;
+			}
+
+			std::string line;
+			std::size_t lineNumber = 0;
+
+			while (std::getline(file, line)) {
+				++lineNumber;
+
+				line = Trim(line);
+
+				if (line.empty() ||
+					line.starts_with('#') ||
+					line.starts_with(';')) {
+					continue;
+				}
+
+				const auto equalsPosition =
+					line.find('=');
+
+				if (equalsPosition ==
+					std::string::npos) {
+
+					REX::WARN(
+						"[Smoking Guns] Malformed weapon profile "
+						"line {} in {}",
+						lineNumber,
+						path.filename().string());
+
+					continue;
+				}
+
+				const std::string leftSide =
+					Trim(
+						line.substr(
+							0,
+							equalsPosition));
+
+				const std::string attachmentText =
+					Trim(
+						line.substr(
+							equalsPosition + 1));
+
+				//
+				// Ignore the human-readable weapon name after ':'.
+				//
+				const auto colonPosition =
+					leftSide.find(':');
+
+				const std::string weaponReference =
+					Trim(
+						leftSide.substr(
+							0,
+							colonPosition));
+
+				const auto weaponSeparator =
+					weaponReference.find('|');
+
+				if (weaponSeparator ==
+					std::string::npos) {
+
+					REX::WARN(
+						"[Smoking Guns] Invalid weapon reference "
+						"on line {} in {}",
+						lineNumber,
+						path.filename().string());
+
+					continue;
+				}
+
+				const std::string weaponPlugin =
+					Trim(
+						weaponReference.substr(
+							0,
+							weaponSeparator));
+
+				const std::string weaponIDText =
+					Trim(
+						weaponReference.substr(
+							weaponSeparator + 1));
+
+				std::uint32_t weaponLocalID = 0;
+
+				try {
+					std::size_t parsed = 0;
+
+					weaponLocalID =
+						static_cast<std::uint32_t>(
+							std::stoul(
+								weaponIDText,
+								&parsed,
+								16));
+
+					if (parsed !=
+						weaponIDText.size()) {
+
+						throw std::invalid_argument(
+							"Trailing characters");
+					}
+				}
+				catch (...) {
+					REX::WARN(
+						"[Smoking Guns] Invalid weapon FormID "
+						"on line {} in {}: {}",
+						lineNumber,
+						path.filename().string(),
+						weaponIDText);
+
+					continue;
+				}
+
+				auto* weaponForm =
+					dataHandler->LookupForm(
+						weaponLocalID,
+						weaponPlugin);
+
+				auto* weapon =
+					weaponForm ?
+					weaponForm->As<
+					RE::TESObjectWEAP>() :
+					nullptr;
+
+				if (!weapon) {
+					REX::WARN(
+						"[Smoking Guns] Could not resolve weapon "
+						"{}|{:06X}",
+						weaponPlugin,
+						weaponLocalID);
+
+					continue;
+				}
+
+				WeaponProfile profile{};
+
+				//
+				// Parse comma-separated OMOD references.
+				//
+				std::size_t start = 0;
+
+				while (start <
+					attachmentText.size()) {
+
+					const auto comma =
+						attachmentText.find(
+							',',
+							start);
+
+					const std::string token =
+						Trim(
+							attachmentText.substr(
+								start,
+								comma == std::string::npos ?
+								std::string::npos :
+								comma - start));
+
+					if (!token.empty()) {
+						const auto separator =
+							token.find('|');
+
+						if (separator ==
+							std::string::npos) {
+
+							REX::WARN(
+								"[Smoking Guns] Invalid attachment "
+								"reference on line {} in {}: {}",
+								lineNumber,
+								path.filename().string(),
+								token);
+						}
+						else {
+							const std::string modPlugin =
+								Trim(
+									token.substr(
+										0,
+										separator));
+
+							const std::string modIDText =
+								Trim(
+									token.substr(
+										separator + 1));
+
+							try {
+								std::size_t parsed = 0;
+
+								const auto modLocalID =
+									static_cast<std::uint32_t>(
+										std::stoul(
+											modIDText,
+											&parsed,
+											16));
+
+								if (parsed !=
+									modIDText.size()) {
+
+									throw std::invalid_argument(
+										"Trailing characters");
+								}
+
+								auto* modForm =
+									dataHandler->LookupForm(
+										modLocalID,
+										modPlugin);
+
+								auto* mod =
+									modForm ?
+									modForm->As<
+									RE::BGSMod::Attachment::Mod>() :
+									nullptr;
+
+								if (mod) {
+									profile.requiredAttachments
+										.push_back(mod);
+								}
+								else {
+									REX::WARN(
+										"[Smoking Guns] Could not resolve "
+										"required attachment {}|{:06X}",
+										modPlugin,
+										modLocalID);
+								}
+							}
+							catch (...) {
+								REX::WARN(
+									"[Smoking Guns] Invalid attachment FormID "
+									"on line {} in {}: {}",
+									lineNumber,
+									path.filename().string(),
+									modIDText);
+							}
+						}
+					}
+
+					if (comma ==
+						std::string::npos) {
+						break;
+					}
+
+					start = comma + 1;
+				}
+
+				weaponProfiles[
+					weapon->GetFormID()] =
+					std::move(profile);
+
+					++loadedProfiles;
+
+					REX::DEBUG(
+						"[Smoking Guns] Weapon profile registered: "
+						"{}|{:06X} -> runtime {:08X}, "
+						"requiredAttachments={}",
+						weaponPlugin,
+						weaponLocalID,
+						weapon->GetFormID(),
+						weaponProfiles[
+							weapon->GetFormID()]
+						.requiredAttachments.size());
+			}
+		}
+
+		REX::INFO(
+			"[Smoking Guns] Loaded {} weapon profiles",
+			loadedProfiles);
 	}
 }

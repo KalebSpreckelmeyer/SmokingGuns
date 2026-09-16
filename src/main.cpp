@@ -1,6 +1,7 @@
 #include "ConfigManager.h"
 #include "GraphManager.h"
 #include "SmokeCalculation.h"
+#include "AttachmentManager.h"
 #include <variant>
 
 namespace Papyrus
@@ -94,6 +95,8 @@ namespace Papyrus
 				"event={:08X}, current={:08X}",
 				eventWeapon->GetFormID(),
 				equippedWeapon->GetFormID());
+
+			return false;
 		}
 
 		//
@@ -145,8 +148,157 @@ namespace Papyrus
 
 		//
 		// Step 5:
-		// Only supported weapons need their instance data inspected.
+		// Look up the Smoking Guns weapon profile.
 		//
+		const auto& config =
+			SmokingGuns::ConfigManager::GetSingleton();
+
+		const auto* weaponProfile =
+			config.GetWeaponProfile(
+				equippedWeapon);
+
+		if (!weaponProfile) {
+			REX::WARN(
+				"[Smoking Guns] Compatible weapon {:08X} "
+				"has no weapon profile",
+				equippedWeapon->GetFormID());
+		}
+		else {
+			REX::INFO(
+				"[Smoking Guns] Weapon profile found: "
+				"{} required attachments",
+				weaponProfile
+				->requiredAttachments
+				.size());
+
+			for (const auto* attachment :
+				weaponProfile->requiredAttachments) {
+
+				if (!attachment) {
+					continue;
+				}
+
+				REX::DEBUG(
+					"[Smoking Guns] Required attachment: {:08X}",
+					attachment->GetFormID());
+			}
+		}
+
+		//
+		// Step 6:
+		// Find the equipped inventory stack's object-instance data
+		// and inspect its required Smoking Guns attachments.
+		//
+		auto* objectInstanceExtra =
+			SmokingGuns::AttachmentManager::
+			FindEquippedInstanceExtra(
+				player,
+				equippedWeapon);
+
+		if (!objectInstanceExtra) {
+			REX::WARN(
+				"[Smoking Guns] Could not locate object-instance "
+				"extra data for equipped weapon {:08X}",
+				equippedWeapon->GetFormID());
+		}
+		else if (weaponProfile) {
+			for (auto* attachment :
+				weaponProfile->requiredAttachments) {
+
+				if (!attachment) {
+					continue;
+				}
+
+				const bool installed =
+					objectInstanceExtra->HasMod(
+						*attachment);
+
+				const auto resolvedAttachIndex =
+					SmokingGuns::AttachmentManager::
+					FindAttachIndex(
+						equippedWeapon,
+						attachment);
+
+				if (installed) {
+					const auto installedInfo =
+						SmokingGuns::AttachmentManager::
+						FindInstalledModIndexInfo(
+							objectInstanceExtra,
+							attachment);
+
+					if (installedInfo) {
+						REX::INFO(
+							"[Smoking Guns] Required attachment {:08X}: "
+							"PRESENT, storedIndex={}, rank={}",
+							attachment->GetFormID(),
+							installedInfo->attachIndex,
+							installedInfo->rank);
+					}
+					else {
+						REX::WARN(
+							"[Smoking Guns] Required attachment {:08X}: "
+							"PRESENT, but no matching ObjectIndexData "
+							"entry was found",
+							attachment->GetFormID());
+					}
+
+					if (resolvedAttachIndex) {
+						REX::INFO(
+							"[Smoking Guns] Base-weapon attach-index "
+							"resolver returned {}",
+							*resolvedAttachIndex);
+					}
+					else {
+						REX::WARN(
+							"[Smoking Guns] Base-weapon attach-index "
+							"resolver found no match for {:08X}",
+							attachment->GetFormID());
+					}
+				}
+				else {
+					constexpr std::uint32_t testModFormID = 0x3C004C86;
+
+					if (attachment->GetFormID() == testModFormID) {
+
+						constexpr std::uint8_t testAttachIndex = 0;
+						constexpr std::uint8_t testRank = 1;
+
+						/*REX::INFO(
+							"[Smoking Guns] Required attachment {:08X}: "
+							"MISSING; attempting test install "
+							"with index={}, rank={}",
+							attachment->GetFormID(),
+							testAttachIndex,
+							testRank);*/
+
+						/*const bool added =
+							SmokingGuns::AttachmentManager::
+							AddModToInstance(
+								objectInstanceExtra,
+								attachment,
+								testAttachIndex,
+								testRank);
+
+						REX::INFO(
+							"[Smoking Guns] Test attachment install result: {}",
+							added ? "PRESENT" : "FAILED");*/
+						REX::WARN(
+							"[Smoking Guns] Required attachment {:08X}: MISSING",
+							attachment->GetFormID());
+					}
+				}
+			}
+
+		}
+
+		SmokingGuns::AttachmentManager::LogAllMods(
+			objectInstanceExtra);
+
+		//
+		// Step 7:
+		// Instance Data
+		// 
+
 		auto* instanceData =
 			equipped.instanceData.get();
 
@@ -165,7 +317,7 @@ namespace Papyrus
 				instanceData);
 
 		//
-		// Step 6:
+		// Step 8:
 		// Read the resolved ammo and look up its configured impulse.
 		//
 		auto* instanceAmmo =
@@ -175,9 +327,6 @@ namespace Papyrus
 			instanceAmmo ?
 			instanceAmmo->GetFormID() :
 			0;
-
-		const auto& config =
-			SmokingGuns::ConfigManager::GetSingleton();
 
 		const float ammoImpulse =
 			config.GetAmmoImpulse(
@@ -197,10 +346,8 @@ namespace Papyrus
 			weaponData->ammoCapacity);
 
 		//
-		// Step 7:
-		// Calculate SmokeImpulse.
-		//
-		// We are deliberately NOT writing this to the graph yet.
+		// Step 9:
+		// Calculate SmokeImpulse and write it to the weapon graphs.
 		//
 		const auto smokeCalculation =
 			SmokingGuns::SmokeCalculation::Calculate(
@@ -241,7 +388,7 @@ namespace Papyrus
 			smokeWrite.thirdPersonWritten);
 
 		//
-		// Step 8:
+		// Step 10:
 		// SmokeDecayImpulse already has settled semantics,
 		// so write it directly from the general config.
 		//
@@ -286,6 +433,52 @@ namespace Papyrus
 		return true;
 	}
 
+	bool PrepareInventoryWeapon(
+		std::monostate,
+		RE::TESForm* a_form)
+	{
+		if (!a_form) {
+			return false;
+		}
+
+		auto* weapon =
+			a_form->As<RE::TESObjectWEAP>();
+
+		if (!weapon) {
+			return false;
+		}
+
+		auto* player =
+			RE::PlayerCharacter::GetSingleton();
+
+		if (!player) {
+			return false;
+		}
+
+		const auto& config =
+			SmokingGuns::ConfigManager::
+			GetSingleton();
+
+		const auto* profile =
+			config.GetWeaponProfile(
+				weapon);
+
+		if (!profile) {
+			return false;
+		}
+
+		REX::INFO(
+			"[Smoking Guns] Preparing newly-added weapon "
+			"{:08X} before equip",
+			weapon->GetFormID());
+
+		return SmokingGuns::AttachmentManager::
+			PrepareUnequippedWeaponStacks(
+				player,
+				weapon,
+				*profile);
+	}
+
 	bool RegisterFunctions(RE::BSScript::IVirtualMachine* a_vm)
 	{
 		if (!a_vm) {
@@ -308,6 +501,14 @@ namespace Papyrus
 			ReportEquipped);
 
 		REX::INFO("[Smoking Guns] Papyrus functions registered");
+
+		REX::INFO(
+			"[Smoking Guns] Binding PrepareInventoryWeapon");
+
+		a_vm->BindNativeMethod(
+			"SGNative",
+			"PrepareInventoryWeapon",
+			PrepareInventoryWeapon);
 
 		return true;
 	}
