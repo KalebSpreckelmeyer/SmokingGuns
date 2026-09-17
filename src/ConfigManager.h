@@ -2,14 +2,27 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <string>
 #include <unordered_map>
 #include <vector>
 #include "RE/B/BGSMod.h"
 
 namespace SmokingGuns
 {
+	struct EffectRequirement
+	{
+		std::string attachPoint;
+		std::string nifPath;
+	};
+
 	struct WeaponProfile
 	{
+		std::vector<EffectRequirement> effects;
+
+		// Transitional storage for the retired OMOD experiment.  The new
+		// profile parser never populates this collection; it remains only so
+		// the old AttachmentManager source can stay buildable while that code
+		// is removed in a later cleanup commit.
 		std::vector<RE::BGSMod::Attachment::Mod*> requiredAttachments;
 	};
 
@@ -37,6 +50,7 @@ namespace SmokingGuns
 		void LoadGeneralConfig();
 		void LoadAmmoConfigs();
 		void LoadWeaponConfigs();
+		void LoadLegacyWeaponConfigs();
 
 		float ammoMult{ 1.0f };
 		float weightMult{ 1.0f };

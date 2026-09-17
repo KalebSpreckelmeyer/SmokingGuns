@@ -2,22 +2,37 @@
 
 **Smoking Guns F4SE** is the native runtime component for **Smoking Guns**, a weapon-smoke framework for Fallout 4.
 
-The plugin provides runtime support for identifying weapons and their installed components, gathering the information needed by the smoke system, and assigning the appropriate Smoking Guns attachments automatically.
+The plugin identifies the equipped weapon, reads authored Smoking Guns Parent Attach Points from the live assembled weapon tree, and injects the configured effect NIFs directly into the first- and third-person scene graphs.
 
 ## Purpose
 
 Smoking Guns uses modular NIF effects and weapon behavior graphs to add persistent, state-based smoke effects to firearms.
 
-Because Fallout 4 weapons cannot reliably and automatically attach new attachments natively this plugin will handle that aspect of integration in addition to other supporting features for the Smoking Guns mod. 
+The runtime injector does not require per-emitter OMOD, STAT, MISC, ACTI, Object Template, or attach-keyword records. Weapon authors provide real `BSConnectPoint::Parents` entries named `P-SG_*`; the plugin creates its own `SG_Runtime_*` nodes beneath those locators.
 
 ## Features
 
-* Inspects equipped weapon and attachment information at runtime.
-* Determines which Smoking Guns support attachments are applicable to a weapon configuration.
-* Applies the appropriate smoke-system attachments automatically.
+* Resolves the equipped weapon to a section-based INI profile.
+* Traverses modular first- and third-person weapon trees for `P-SG_*` locators.
+* Loads effect NIFs directly through Fallout's model database.
+* Reconciles missing runtime nodes idempotently after weapon-tree rebuilds.
 * Provides native functionality to the accompanying Papyrus scripts.
-* Designed to minimize the amount of weapon-specific Creation Kit wiring required by Smoking Guns.
+* Keeps smoke calculations and behavior-graph variable writes separate from scene injection.
 * Built with multi-runtime Fallout 4 compatibility in mind.
+
+## Weapon Profiles
+
+Weapon profiles live in `Data/F4SE/Plugins/SmokingGuns/Weapons/*.ini`.
+
+```ini
+# .500 S&W Magnum
+[SomeWeapon.esp|001234]
+
+P-SG_EjectionPort = SmokingGuns\Effects\EjectionPortTest.nif
+P-SG_MuzzleCenter = SmokingGuns\Effects\MuzzleSmoke.nif  # inline comments work
+```
+
+The section identifies the weapon by plugin and local FormID. Each entry maps an authored Parent Attach Point to an effect NIF path relative to `Data\Meshes`. Repeating a locator for the same weapon replaces its earlier mapping.
 
 ## Runtime Support
 

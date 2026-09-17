@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <optional>
 #include <string>
 
 namespace
@@ -29,6 +30,77 @@ namespace
 			a_value.end());
 
 		return a_value;
+	}
+
+	std::string StripInlineComment(std::string a_value)
+	{
+		bool inQuotes = false;
+
+		for (std::size_t index = 0;
+			index < a_value.size();
+			++index) {
+
+			const char character = a_value[index];
+
+			if (character == '"') {
+				inQuotes = !inQuotes;
+				continue;
+			}
+
+			if (!inQuotes &&
+				(character == '#' || character == ';')) {
+
+				a_value.erase(index);
+				break;
+			}
+		}
+
+		return Trim(std::move(a_value));
+	}
+
+	std::string Unquote(std::string a_value)
+	{
+		a_value = Trim(std::move(a_value));
+
+		if (a_value.size() >= 2 &&
+			a_value.front() == '"' &&
+			a_value.back() == '"') {
+
+			return a_value.substr(1, a_value.size() - 2);
+		}
+
+		return a_value;
+	}
+
+	bool TryParseFormReference(
+		const std::string& a_text,
+		std::string& a_pluginName,
+		std::uint32_t& a_localFormID)
+	{
+		const auto separator = a_text.find('|');
+
+		if (separator == std::string::npos) {
+			return false;
+		}
+
+		a_pluginName = Trim(a_text.substr(0, separator));
+		const std::string formIDText =
+			Trim(a_text.substr(separator + 1));
+
+		if (a_pluginName.empty() || formIDText.empty()) {
+			return false;
+		}
+
+		try {
+			std::size_t parsed = 0;
+			a_localFormID = static_cast<std::uint32_t>(
+				std::stoul(formIDText, &parsed, 16));
+
+			return parsed == formIDText.size();
+		}
+		catch (...) {
+			return false;
+		}
 	}
 
 	bool TryParseFloat(
@@ -165,7 +237,7 @@ namespace SmokingGuns
 		while (std::getline(file, line)) {
 			++lineNumber;
 
-			line = Trim(line);
+			line = StripInlineComment(std::move(line));
 
 			// Ignore blank lines and comments.
 			if (line.empty() ||
@@ -293,7 +365,7 @@ namespace SmokingGuns
 			while (std::getline(file, line)) {
 				++lineNumber;
 
-				line = Trim(line);
+				line = StripInlineComment(std::move(line));
 
 				if (line.empty() ||
 					line.starts_with('#') ||
@@ -418,6 +490,202 @@ namespace SmokingGuns
 	}
 
 	void ConfigManager::LoadWeaponConfigs()
+	{
+		const std::filesystem::path weaponDirectory =
+			"Data/F4SE/Plugins/SmokingGuns/Weapons";
+
+		weaponProfiles.clear();
+
+		if (!std::filesystem::exists(weaponDirectory)) {
+			REX::WARN(
+				"[Smoking Guns] Weapon config directory not found: {}",
+				weaponDirectory.string());
+
+			return;
+		}
+
+		auto* dataHandler = RE::TESDataHandler::GetSingleton();
+
+		if (!dataHandler) {
+			REX::ERROR(
+				"[Smoking Guns] TESDataHandler was unavailable "
+				"while loading weapon configs");
+
+			return;
+		}
+
+		std::size_t loadedRequirements = 0;
+
+		for (const auto& directoryEntry :
+			std::filesystem::directory_iterator(weaponDirectory)) {
+
+			if (!directoryEntry.is_regular_file()) {
+				continue;
+			}
+
+			const auto& path = directoryEntry.path();
+
+			if (path.extension() != ".ini") {
+				continue;
+			}
+
+			REX::INFO(
+				"[Smoking Guns] Loading weapon config: {}",
+				path.filename().string());
+
+			std::ifstream file(path);
+
+			if (!file.is_open()) {
+				REX::WARN(
+					"[Smoking Guns] Could not open weapon config: {}",
+					path.string());
+
+				continue;
+			}
+
+			std::optional<std::uint32_t> currentWeaponFormID;
+			std::string line;
+			std::size_t lineNumber = 0;
+
+			while (std::getline(file, line)) {
+				++lineNumber;
+				line = StripInlineComment(std::move(line));
+
+				if (line.empty()) {
+					continue;
+				}
+
+				if (line.front() == '[' && line.back() == ']') {
+					const std::string weaponReference =
+						Trim(line.substr(1, line.size() - 2));
+
+					std::string pluginName;
+					std::uint32_t localFormID = 0;
+
+					if (!TryParseFormReference(
+						weaponReference,
+						pluginName,
+						localFormID)) {
+
+						REX::WARN(
+							"[Smoking Guns] Invalid weapon section on line "
+							"{} in {}: {}",
+							lineNumber,
+							path.filename().string(),
+							line);
+
+						currentWeaponFormID.reset();
+						continue;
+					}
+
+					auto* form = dataHandler->LookupForm(
+						localFormID,
+						pluginName);
+
+					auto* weapon =
+						form ? form->As<RE::TESObjectWEAP>() : nullptr;
+
+					if (!weapon) {
+						REX::WARN(
+							"[Smoking Guns] Could not resolve weapon "
+							"{}|{:06X} from {}",
+							pluginName,
+							localFormID,
+							path.filename().string());
+
+						currentWeaponFormID.reset();
+						continue;
+					}
+
+					currentWeaponFormID = weapon->GetFormID();
+					weaponProfiles.try_emplace(*currentWeaponFormID);
+
+					REX::DEBUG(
+						"[Smoking Guns] Weapon profile section: "
+						"{}|{:06X} -> runtime {:08X}",
+						pluginName,
+						localFormID,
+						*currentWeaponFormID);
+
+					continue;
+				}
+
+				const auto equalsPosition = line.find('=');
+
+				if (equalsPosition == std::string::npos) {
+					REX::WARN(
+						"[Smoking Guns] Malformed weapon requirement "
+						"on line {} in {}: {}",
+						lineNumber,
+						path.filename().string(),
+						line);
+
+					continue;
+				}
+
+				if (!currentWeaponFormID) {
+					REX::WARN(
+						"[Smoking Guns] Effect requirement outside a valid "
+						"weapon section on line {} in {}",
+						lineNumber,
+						path.filename().string());
+
+					continue;
+				}
+
+				const std::string attachPoint =
+					Trim(line.substr(0, equalsPosition));
+
+				const std::string nifPath =
+					Unquote(line.substr(equalsPosition + 1));
+
+				if (!attachPoint.starts_with("P-SG_") ||
+					nifPath.empty()) {
+
+					REX::WARN(
+						"[Smoking Guns] Invalid effect requirement on line "
+						"{} in {}: {}",
+						lineNumber,
+						path.filename().string(),
+						line);
+
+					continue;
+				}
+
+				auto& requirements =
+					weaponProfiles[*currentWeaponFormID].effects;
+
+				const auto existing = std::find_if(
+					requirements.begin(),
+					requirements.end(),
+					[&attachPoint](const EffectRequirement& a_entry) {
+						return a_entry.attachPoint == attachPoint;
+					});
+
+				if (existing != requirements.end()) {
+					REX::WARN(
+						"[Smoking Guns] Replacing duplicate requirement '{}' "
+						"for weapon {:08X}",
+						attachPoint,
+						*currentWeaponFormID);
+
+					existing->nifPath = nifPath;
+				}
+				else {
+					requirements.push_back({ attachPoint, nifPath });
+					++loadedRequirements;
+				}
+			}
+		}
+
+		REX::INFO(
+			"[Smoking Guns] Loaded {} weapon profiles with {} "
+			"runtime effect requirements",
+			weaponProfiles.size(),
+			loadedRequirements);
+	}
+
+	void ConfigManager::LoadLegacyWeaponConfigs()
 	{
 		const std::filesystem::path weaponDirectory =
 			"Data/F4SE/Plugins/SmokingGuns/Weapons";

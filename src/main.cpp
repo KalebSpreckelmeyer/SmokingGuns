@@ -1,8 +1,10 @@
 #include "ConfigManager.h"
 #include "GraphManager.h"
+#include "RuntimeManager.h"
 #include "SmokeCalculation.h"
-#include "AttachmentManager.h"
 #include <variant>
+
+#include "SmokeFollowTest.h"
 
 namespace Papyrus
 {
@@ -10,6 +12,41 @@ namespace Papyrus
 	{
 		REX::INFO("[Smoking Guns] Ping received from Papyrus");
 		return true;
+	}
+
+	bool StartSmokeFollowTest(
+		std::monostate,
+		RE::TESObjectREFR* a_hostRef)
+	{
+		REX::INFO(
+			"[Smoking Guns][SmokeFollowTest] "
+			"Papyrus StartSmokeFollowTest called, ref={}",
+			a_hostRef ? a_hostRef->GetFormID() : 0);
+
+		return SmokingGuns::SmokeFollowTest::Start(
+			a_hostRef);
+	}
+
+
+	bool UpdateSmokeFollowTest(
+		std::monostate)
+	{
+		REX::INFO(
+			"[Smoking Guns][SmokeFollowTest] "
+			"Papyrus UpdateSmokeFollowTest called");
+
+		return SmokingGuns::SmokeFollowTest::Update();
+	}
+
+
+	bool StopSmokeFollowTest(
+		std::monostate)
+	{
+		REX::INFO(
+			"[Smoking Guns][SmokeFollowTest] "
+			"Papyrus StopSmokeFollowTest called");
+
+		return SmokingGuns::SmokeFollowTest::Stop();
 	}
 
 	bool ReportEquipped(std::monostate, RE::TESForm* a_form)
@@ -99,6 +136,9 @@ namespace Papyrus
 			return false;
 		}
 
+		SmokingGuns::RuntimeManager::GetSingleton()
+			.OnWeaponEquipped(equippedWeapon);
+
 		//
 		// Step 4:
 		// Check framework compatibility BEFORE doing ammo,
@@ -165,137 +205,19 @@ namespace Papyrus
 		}
 		else {
 			REX::INFO(
-				"[Smoking Guns] Weapon profile found: "
-				"{} required attachments",
-				weaponProfile
-				->requiredAttachments
-				.size());
+				"[Smoking Guns] Weapon profile found: {} runtime effects",
+				weaponProfile->effects.size());
 
-			for (const auto* attachment :
-				weaponProfile->requiredAttachments) {
-
-				if (!attachment) {
-					continue;
-				}
-
+			for (const auto& effect : weaponProfile->effects) {
 				REX::DEBUG(
-					"[Smoking Guns] Required attachment: {:08X}",
-					attachment->GetFormID());
+					"[Smoking Guns] Runtime effect: '{}' -> '{}'",
+					effect.attachPoint,
+					effect.nifPath);
 			}
 		}
 
 		//
 		// Step 6:
-		// Find the equipped inventory stack's object-instance data
-		// and inspect its required Smoking Guns attachments.
-		//
-		auto* objectInstanceExtra =
-			SmokingGuns::AttachmentManager::
-			FindEquippedInstanceExtra(
-				player,
-				equippedWeapon);
-
-		if (!objectInstanceExtra) {
-			REX::WARN(
-				"[Smoking Guns] Could not locate object-instance "
-				"extra data for equipped weapon {:08X}",
-				equippedWeapon->GetFormID());
-		}
-		else if (weaponProfile) {
-			for (auto* attachment :
-				weaponProfile->requiredAttachments) {
-
-				if (!attachment) {
-					continue;
-				}
-
-				const bool installed =
-					objectInstanceExtra->HasMod(
-						*attachment);
-
-				const auto resolvedAttachIndex =
-					SmokingGuns::AttachmentManager::
-					FindAttachIndex(
-						equippedWeapon,
-						attachment);
-
-				if (installed) {
-					const auto installedInfo =
-						SmokingGuns::AttachmentManager::
-						FindInstalledModIndexInfo(
-							objectInstanceExtra,
-							attachment);
-
-					if (installedInfo) {
-						REX::INFO(
-							"[Smoking Guns] Required attachment {:08X}: "
-							"PRESENT, storedIndex={}, rank={}",
-							attachment->GetFormID(),
-							installedInfo->attachIndex,
-							installedInfo->rank);
-					}
-					else {
-						REX::WARN(
-							"[Smoking Guns] Required attachment {:08X}: "
-							"PRESENT, but no matching ObjectIndexData "
-							"entry was found",
-							attachment->GetFormID());
-					}
-
-					if (resolvedAttachIndex) {
-						REX::INFO(
-							"[Smoking Guns] Base-weapon attach-index "
-							"resolver returned {}",
-							*resolvedAttachIndex);
-					}
-					else {
-						REX::WARN(
-							"[Smoking Guns] Base-weapon attach-index "
-							"resolver found no match for {:08X}",
-							attachment->GetFormID());
-					}
-				}
-				else {
-					constexpr std::uint32_t testModFormID = 0x3C004C86;
-
-					if (attachment->GetFormID() == testModFormID) {
-
-						constexpr std::uint8_t testAttachIndex = 0;
-						constexpr std::uint8_t testRank = 1;
-
-						/*REX::INFO(
-							"[Smoking Guns] Required attachment {:08X}: "
-							"MISSING; attempting test install "
-							"with index={}, rank={}",
-							attachment->GetFormID(),
-							testAttachIndex,
-							testRank);*/
-
-						/*const bool added =
-							SmokingGuns::AttachmentManager::
-							AddModToInstance(
-								objectInstanceExtra,
-								attachment,
-								testAttachIndex,
-								testRank);
-
-						REX::INFO(
-							"[Smoking Guns] Test attachment install result: {}",
-							added ? "PRESENT" : "FAILED");*/
-						REX::WARN(
-							"[Smoking Guns] Required attachment {:08X}: MISSING",
-							attachment->GetFormID());
-					}
-				}
-			}
-
-		}
-
-		SmokingGuns::AttachmentManager::LogAllMods(
-			objectInstanceExtra);
-
-		//
-		// Step 7:
 		// Instance Data
 		// 
 
@@ -448,35 +370,10 @@ namespace Papyrus
 			return false;
 		}
 
-		auto* player =
-			RE::PlayerCharacter::GetSingleton();
-
-		if (!player) {
-			return false;
-		}
-
-		const auto& config =
-			SmokingGuns::ConfigManager::
-			GetSingleton();
-
-		const auto* profile =
-			config.GetWeaponProfile(
-				weapon);
-
-		if (!profile) {
-			return false;
-		}
-
-		REX::INFO(
-			"[Smoking Guns] Preparing newly-added weapon "
-			"{:08X} before equip",
-			weapon->GetFormID());
-
-		return SmokingGuns::AttachmentManager::
-			PrepareUnequippedWeaponStacks(
-				player,
-				weapon,
-				*profile);
+		// Kept as a compatibility bridge for the existing Papyrus script.
+		// Runtime scene reconciliation replaces inventory/OMOD mutation.
+		return SmokingGuns::RuntimeManager::GetSingleton()
+			.OnWeaponEquipped(weapon);
 	}
 
 	bool RegisterFunctions(RE::BSScript::IVirtualMachine* a_vm)
@@ -509,6 +406,24 @@ namespace Papyrus
 			"SGNative",
 			"PrepareInventoryWeapon",
 			PrepareInventoryWeapon);
+
+		REX::INFO("[Smoking Guns] Binding StartSmokeFollowTest");
+		a_vm->BindNativeMethod(
+			"SGNative",
+			"StartSmokeFollowTest",
+			StartSmokeFollowTest);
+
+		REX::INFO("[Smoking Guns] Binding UpdateSmokeFollowTest");
+		a_vm->BindNativeMethod(
+			"SGNative",
+			"UpdateSmokeFollowTest",
+			UpdateSmokeFollowTest);
+
+		REX::INFO("[Smoking Guns] Binding StopSmokeFollowTest");
+		a_vm->BindNativeMethod(
+			"SGNative",
+			"StopSmokeFollowTest",
+			StopSmokeFollowTest);
 
 		return true;
 	}
@@ -568,8 +483,11 @@ extern "C" __declspec(dllexport) bool F4SEAPI F4SEPlugin_Load(
 	F4SE::Init(a_f4se);
 
 	REX::INFO("[Smoking Guns] Plugin loaded");
-		
+
 	SmokingGuns::ConfigManager::GetSingleton().Load();
+
+	SmokingGuns::RuntimeManager::GetSingleton()
+		.InstallUpdateHook();
 
 	const auto messaging = F4SE::GetMessagingInterface();
 
@@ -596,6 +514,7 @@ extern "C" __declspec(dllexport) bool F4SEAPI F4SEPlugin_Load(
 		REX::ERROR("[Smoking Guns] Failed to register Papyrus callback");
 		return false;
 	}
+
 
 	REX::INFO("[Smoking Guns] Papyrus callback registered");
 
