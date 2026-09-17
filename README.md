@@ -34,6 +34,23 @@ P-SG_MuzzleCenter = SmokingGuns\Effects\MuzzleSmoke.nif  # inline comments work
 
 The section identifies the weapon by plugin and local FormID. Each entry maps an authored Parent Attach Point to an effect NIF path relative to `Data\Meshes`. Repeating a locator for the same weapon replaces its earlier mapping.
 
+## Effect NIF Authoring
+
+Effect NIFs are loaded as model-database templates and cloned into independent first- and third-person instances. The runtime wrapper supplies the Parent Attach Point transform, so the effect should be authored around local origin and does not need its own matching Child Attach Point or Creation Kit record.
+
+Controller sequences must have unique names across every effect NIF active on the same weapon. Copying or renaming a NIF file does not rename its internal `NiControllerSequence` blocks. If two attached NIFs expose the same sequence name, a behavior-graph `pSequence` request may activate only one of them.
+
+For example, use location-specific names such as:
+
+```text
+SG_10mm_EjectionPort_Fire_A
+SG_10mm_EjectionPort_Fire_B
+SG_10mm_MuzzleCenter_Fire_A
+SG_10mm_MuzzleCenter_Fire_B
+```
+
+The weapon behavior graph must broadcast each location-specific sequence that should play. Controller palettes and controlled targets should remain self-contained within their effect NIF.
+
 ## Runtime Support
 
 The project is being developed around CommonLibF4 with support planned for the mainstream Fallout 4 runtimes, including:

@@ -31,14 +31,6 @@ namespace SmokingGuns::RuntimeAttachment
 
 		std::vector<RetainedAttachment> retainedAttachments;
 
-		struct GeometryDiagnostics
-		{
-			std::size_t total{ 0 };
-			std::size_t visible{ 0 };
-			std::size_t registered{ 0 };
-			std::size_t rendererReady{ 0 };
-		};
-
 		RetainedAttachment* FindRetainedAttachment(
 			RE::NiAVObject* a_treeRoot,
 			const std::string& a_runtimeName)
@@ -236,37 +228,6 @@ namespace SmokingGuns::RuntimeAttachment
 			return {};
 		}
 
-		GeometryDiagnostics InspectGeometry(RE::NiAVObject* a_root)
-		{
-			GeometryDiagnostics diagnostics{};
-
-			if (!a_root) {
-				return diagnostics;
-			}
-
-			RE::BSVisit::TraverseScenegraphGeometries(
-				a_root,
-				[&](RE::BSGeometry* a_geometry) {
-					++diagnostics.total;
-
-					if (!a_geometry->GetAppCulled()) {
-						++diagnostics.visible;
-					}
-
-					if (a_geometry->registered) {
-						++diagnostics.registered;
-					}
-
-					if (a_geometry->rendererData) {
-						++diagnostics.rendererReady;
-					}
-
-					return RE::BSVisitControl::kContinue;
-				});
-
-			return diagnostics;
-		}
-
 		RE::NiPointer<RE::NiNode> LoadEffectTemplate(
 			const std::string& a_nifPath)
 		{
@@ -446,19 +407,11 @@ namespace SmokingGuns::RuntimeAttachment
 				a_treeRoot,
 				runtimeName);
 				retained && retained->runtimeNode) {
-
-				auto* retainedNode = retained->runtimeNode.get();
-				auto* retainedParent = retainedNode->parent;
-
-				REX::WARN(
+				REX::DEBUG(
 					"[Smoking Guns][RuntimeAttachment] "
-					"{} retained '{}' is not reachable from root: "
-					"node={:p}, parent={:p}, parentHasChild={}",
+					"{} replacing detached runtime node '{}'",
 					a_treeLabel,
-					runtimeName,
-					static_cast<void*>(retainedNode),
-					static_cast<void*>(retainedParent),
-					ParentContainsChild(retainedParent, retainedNode));
+					runtimeName);
 			}
 
 			const auto located = FindConnectPoint(
@@ -527,8 +480,6 @@ namespace SmokingGuns::RuntimeAttachment
 			const bool runtimeHasEffect = ParentContainsChild(
 				runtimeNode.get(),
 				effectRoot.get());
-			const auto geometry = InspectGeometry(effectRoot.get());
-
 			if (parentSet && parentHasChild && reachable &&
 				effectParentSet && runtimeHasEffect) {
 
@@ -543,68 +494,28 @@ namespace SmokingGuns::RuntimeAttachment
 
 				REX::INFO(
 					"[Smoking Guns][RuntimeAttachment] "
-					"{} attach verification for '{}' as '{}': "
-					"parent='{}', children={}, parentSet={}, "
-					"parentHasChild={}, reachable={}, "
-					"template={:p}, clone={:p}, "
-					"effectParentSet={}, runtimeHasEffect={}, "
-					"geometry=(total={}, visible={}, registered={}, "
-					"rendererReady={}), "
-					"pointPosition=({:.3f}, {:.3f}, {:.3f}), "
-					"pointScale={:.3f}",
+					"{} attached '{}' as '{}' beneath '{}'",
 					a_treeLabel,
 					requirement.nifPath,
 					runtimeName,
-					located.parent->name.c_str(),
-					located.parent->children.size(),
-					parentSet,
-					parentHasChild,
-					reachable,
-					static_cast<void*>(effectTemplate.get()),
-					static_cast<void*>(effectRoot.get()),
-					effectParentSet,
-					runtimeHasEffect,
-					geometry.total,
-					geometry.visible,
-					geometry.registered,
-					geometry.rendererReady,
-					located.point->position.x,
-					located.point->position.y,
-					located.point->position.z,
-					located.point->scale);
+					located.parent->name.c_str());
 			}
 			else {
 				REX::ERROR(
 					"[Smoking Guns][RuntimeAttachment] "
 					"{} attach verification for '{}' as '{}': "
-					"parent='{}', children={}, parentSet={}, "
+					"parent='{}', parentSet={}, "
 					"parentHasChild={}, reachable={}, "
-					"template={:p}, clone={:p}, "
-					"effectParentSet={}, runtimeHasEffect={}, "
-					"geometry=(total={}, visible={}, registered={}, "
-					"rendererReady={}), "
-					"pointPosition=({:.3f}, {:.3f}, {:.3f}), "
-					"pointScale={:.3f}",
+					"effectParentSet={}, runtimeHasEffect={}",
 					a_treeLabel,
 					requirement.nifPath,
 					runtimeName,
 					located.parent->name.c_str(),
-					located.parent->children.size(),
 					parentSet,
 					parentHasChild,
 					reachable,
-					static_cast<void*>(effectTemplate.get()),
-					static_cast<void*>(effectRoot.get()),
 					effectParentSet,
-					runtimeHasEffect,
-					geometry.total,
-					geometry.visible,
-					geometry.registered,
-					geometry.rendererReady,
-					located.point->position.x,
-					located.point->position.y,
-					located.point->position.z,
-					located.point->scale);
+					runtimeHasEffect);
 			}
 		}
 
