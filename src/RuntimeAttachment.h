@@ -29,6 +29,8 @@ namespace SmokingGuns::RuntimeAttachment
 		RE::NiAVObject* a_treeRoot,
 		const WeaponProfile& a_profile);
 
+	void ReleaseRetainedAttachments();
+
 	[[nodiscard]] ReconcileResult ReconcileTree(
 		RE::NiAVObject* a_treeRoot,
 		const WeaponProfile& a_profile,

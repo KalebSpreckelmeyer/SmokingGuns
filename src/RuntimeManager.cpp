@@ -120,6 +120,7 @@ namespace SmokingGuns
 		auto* weapon = ResolveEquippedWeapon(player);
 
 		if (!weapon) {
+			RuntimeAttachment::ReleaseRetainedAttachments();
 			observedWeaponFormID = 0;
 			observedFirstPersonRoot = nullptr;
 			observedThirdPersonRoot = nullptr;
@@ -130,6 +131,7 @@ namespace SmokingGuns
 			ConfigManager::GetSingleton().GetWeaponProfile(weapon);
 
 		if (!profile || profile->effects.empty()) {
+			RuntimeAttachment::ReleaseRetainedAttachments();
 			observedWeaponFormID = weapon->GetFormID();
 			observedFirstPersonRoot = player->Get3D(true);
 			observedThirdPersonRoot = player->Get3D(false);
@@ -141,6 +143,10 @@ namespace SmokingGuns
 
 		const bool weaponChanged =
 			observedWeaponFormID != weapon->GetFormID();
+
+		if (weaponChanged) {
+			RuntimeAttachment::ReleaseRetainedAttachments();
+		}
 
 		const bool firstPersonRootChanged =
 			observedFirstPersonRoot != firstPersonRoot;

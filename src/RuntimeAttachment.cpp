@@ -22,6 +22,68 @@ namespace SmokingGuns::RuntimeAttachment
 			const RE::BSConnectPoint::Parents::ConnectPoint* point{ nullptr };
 		};
 
+		struct RetainedAttachment
+		{
+			RE::NiAVObject* treeRoot{ nullptr };
+			std::string runtimeName;
+			RE::NiPointer<RE::NiNode> runtimeNode;
+		};
+
+		std::vector<RetainedAttachment> retainedAttachments;
+
+		RetainedAttachment* FindRetainedAttachment(
+			RE::NiAVObject* a_treeRoot,
+			const std::string& a_runtimeName)
+		{
+			const auto found = std::ranges::find_if(
+				retainedAttachments,
+				[&](const RetainedAttachment& a_entry) {
+					return a_entry.treeRoot == a_treeRoot &&
+						a_entry.runtimeName == a_runtimeName;
+				});
+
+			return found != retainedAttachments.end() ?
+				std::addressof(*found) :
+				nullptr;
+		}
+
+		void RetainAttachment(
+			RE::NiAVObject* a_treeRoot,
+			const std::string& a_runtimeName,
+			const RE::NiPointer<RE::NiNode>& a_runtimeNode)
+		{
+			if (auto* retained = FindRetainedAttachment(
+				a_treeRoot,
+				a_runtimeName)) {
+
+				retained->runtimeNode = a_runtimeNode;
+				return;
+			}
+
+			retainedAttachments.push_back({
+				a_treeRoot,
+				a_runtimeName,
+				a_runtimeNode
+			});
+		}
+
+		bool ParentContainsChild(
+			const RE::NiNode* a_parent,
+			const RE::NiAVObject* a_child)
+		{
+			if (!a_parent || !a_child) {
+				return false;
+			}
+
+			for (const auto& candidate : a_parent->children) {
+				if (candidate.get() == a_child) {
+					return true;
+				}
+			}
+
+			return false;
+		}
+
 		RE::NiMatrix3 QuaternionToMatrix(
 			const RE::NiQuaternion& a_rotation)
 		{
@@ -248,6 +310,18 @@ namespace SmokingGuns::RuntimeAttachment
 		return true;
 	}
 
+	void ReleaseRetainedAttachments()
+	{
+		if (!retainedAttachments.empty()) {
+			REX::DEBUG(
+				"[Smoking Guns][RuntimeAttachment] "
+				"Releasing {} retained runtime attachment(s)",
+				retainedAttachments.size());
+		}
+
+		retainedAttachments.clear();
+	}
+
 	ReconcileResult ReconcileTree(
 		RE::NiAVObject* a_treeRoot,
 		const WeaponProfile& a_profile,
@@ -268,6 +342,25 @@ namespace SmokingGuns::RuntimeAttachment
 			if (FindObject(a_treeRoot, runtimeName)) {
 				++result.alreadyPresent;
 				continue;
+			}
+
+			if (const auto* retained = FindRetainedAttachment(
+				a_treeRoot,
+				runtimeName);
+				retained && retained->runtimeNode) {
+
+				auto* retainedNode = retained->runtimeNode.get();
+				auto* retainedParent = retainedNode->parent;
+
+				REX::WARN(
+					"[Smoking Guns][RuntimeAttachment] "
+					"{} retained '{}' is not reachable from root: "
+					"node={:p}, parent={:p}, parentHasChild={}",
+					a_treeLabel,
+					runtimeName,
+					static_cast<void*>(retainedNode),
+					static_cast<void*>(retainedParent),
+					ParentContainsChild(retainedParent, retainedNode));
 			}
 
 			const auto located = FindConnectPoint(
@@ -300,18 +393,77 @@ namespace SmokingGuns::RuntimeAttachment
 				QuaternionToMatrix(located.point->rotation);
 			runtimeNode->local.scale = located.point->scale;
 
+			RE::NiUpdateData updateData{};
+
+			effectRoot->PreAttachUpdate(runtimeNode.get(), updateData);
 			runtimeNode->AttachChild(effectRoot.get(), true);
+			effectRoot->PostAttachUpdate();
+
+			runtimeNode->PreAttachUpdate(located.parent, updateData);
 			located.parent->AttachChild(runtimeNode.get(), true);
+			runtimeNode->PostAttachUpdate();
+			runtimeNode->UpdateTransformAndBounds(updateData);
+			located.parent->UpdateUpwardPass(updateData);
 
-			++result.attached;
+			RetainAttachment(a_treeRoot, runtimeName, runtimeNode);
 
-			REX::INFO(
-				"[Smoking Guns][RuntimeAttachment] "
-				"{} attached '{}' as '{}' beneath '{}'",
-				a_treeLabel,
-				requirement.nifPath,
-				runtimeName,
-				located.parent->name.c_str());
+			const bool parentSet =
+				runtimeNode->parent == located.parent;
+			const bool parentHasChild = ParentContainsChild(
+				located.parent,
+				runtimeNode.get());
+			const bool reachable =
+				FindObject(a_treeRoot, runtimeName) == runtimeNode.get();
+
+			if (parentSet && parentHasChild && reachable) {
+				++result.attached;
+			}
+			else {
+				++result.loadFailed;
+			}
+
+			if (parentSet && parentHasChild && reachable) {
+				REX::INFO(
+					"[Smoking Guns][RuntimeAttachment] "
+					"{} attach verification for '{}' as '{}': "
+					"parent='{}', children={}, parentSet={}, "
+					"parentHasChild={}, reachable={}, "
+					"pointPosition=({:.3f}, {:.3f}, {:.3f}), "
+					"pointScale={:.3f}",
+					a_treeLabel,
+					requirement.nifPath,
+					runtimeName,
+					located.parent->name.c_str(),
+					located.parent->children.size(),
+					parentSet,
+					parentHasChild,
+					reachable,
+					located.point->position.x,
+					located.point->position.y,
+					located.point->position.z,
+					located.point->scale);
+			}
+			else {
+				REX::ERROR(
+					"[Smoking Guns][RuntimeAttachment] "
+					"{} attach verification for '{}' as '{}': "
+					"parent='{}', children={}, parentSet={}, "
+					"parentHasChild={}, reachable={}, "
+					"pointPosition=({:.3f}, {:.3f}, {:.3f}), "
+					"pointScale={:.3f}",
+					a_treeLabel,
+					requirement.nifPath,
+					runtimeName,
+					located.parent->name.c_str(),
+					located.parent->children.size(),
+					parentSet,
+					parentHasChild,
+					reachable,
+					located.point->position.x,
+					located.point->position.y,
+					located.point->position.z,
+					located.point->scale);
+			}
 		}
 
 		return result;
