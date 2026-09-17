@@ -31,6 +31,14 @@ namespace SmokingGuns::RuntimeAttachment
 
 		std::vector<RetainedAttachment> retainedAttachments;
 
+		struct GeometryDiagnostics
+		{
+			std::size_t total{ 0 };
+			std::size_t visible{ 0 };
+			std::size_t registered{ 0 };
+			std::size_t rendererReady{ 0 };
+		};
+
 		RetainedAttachment* FindRetainedAttachment(
 			RE::NiAVObject* a_treeRoot,
 			const std::string& a_runtimeName)
@@ -228,7 +236,38 @@ namespace SmokingGuns::RuntimeAttachment
 			return {};
 		}
 
-		RE::NiPointer<RE::NiNode> LoadEffect(
+		GeometryDiagnostics InspectGeometry(RE::NiAVObject* a_root)
+		{
+			GeometryDiagnostics diagnostics{};
+
+			if (!a_root) {
+				return diagnostics;
+			}
+
+			RE::BSVisit::TraverseScenegraphGeometries(
+				a_root,
+				[&](RE::BSGeometry* a_geometry) {
+					++diagnostics.total;
+
+					if (!a_geometry->GetAppCulled()) {
+						++diagnostics.visible;
+					}
+
+					if (a_geometry->registered) {
+						++diagnostics.registered;
+					}
+
+					if (a_geometry->rendererData) {
+						++diagnostics.rendererReady;
+					}
+
+					return RE::BSVisitControl::kContinue;
+				});
+
+			return diagnostics;
+		}
+
+		RE::NiPointer<RE::NiNode> LoadEffectTemplate(
 			const std::string& a_nifPath)
 		{
 			std::string normalizedPath = a_nifPath;
@@ -261,6 +300,65 @@ namespace SmokingGuns::RuntimeAttachment
 					static_cast<std::uint32_t>(result));
 
 				return nullptr;
+			}
+
+			return effectRoot;
+		}
+
+		RE::NiPointer<RE::NiNode> CloneEffect(
+			RE::NiNode* a_templateRoot,
+			const std::string& a_nifPath)
+		{
+			if (!a_templateRoot) {
+				return nullptr;
+			}
+
+			// BSModelDB owns and may reuse the demanded root.  Build a unique
+			// scene instance before assigning a parent in either weapon tree.
+			RE::NiCloningProcess cloning{};
+			cloning.copyType =
+				RE::NiCloningProcess::CopyType::kCopyExact;
+			cloning.scale = RE::NiPoint3{ 1.0F, 1.0F, 1.0F };
+
+			RE::NiPointer<RE::NiObject> clonedObject{
+				a_templateRoot->CreateClone(cloning)
+			};
+
+			if (!clonedObject) {
+				REX::ERROR(
+					"[Smoking Guns][RuntimeAttachment] "
+					"Could not clone effect NIF template '{}'",
+					a_nifPath);
+
+				return nullptr;
+			}
+
+			a_templateRoot->ProcessClone(cloning);
+
+			auto* clonedRoot = clonedObject->IsNode();
+
+			if (!clonedRoot) {
+				REX::ERROR(
+					"[Smoking Guns][RuntimeAttachment] "
+					"Clone of effect NIF '{}' was not a node",
+					a_nifPath);
+
+				return nullptr;
+			}
+
+			RE::NiPointer<RE::NiNode> effectRoot{ clonedRoot };
+
+			if (auto* resourceManager =
+				RE::BSShaderResourceManager::GetSingleton()) {
+
+				resourceManager->ApplyMaterials(effectRoot.get());
+			}
+			else {
+				REX::WARN(
+					"[Smoking Guns][RuntimeAttachment] "
+					"Shader resource manager was unavailable while "
+					"preparing '{}'",
+					a_nifPath);
 			}
 
 			return effectRoot;
@@ -379,7 +477,17 @@ namespace SmokingGuns::RuntimeAttachment
 				continue;
 			}
 
-			auto effectRoot = LoadEffect(requirement.nifPath);
+			auto effectTemplate =
+				LoadEffectTemplate(requirement.nifPath);
+
+			if (!effectTemplate) {
+				++result.loadFailed;
+				continue;
+			}
+
+			auto effectRoot = CloneEffect(
+				effectTemplate.get(),
+				requirement.nifPath);
 
 			if (!effectRoot) {
 				++result.loadFailed;
@@ -414,20 +522,34 @@ namespace SmokingGuns::RuntimeAttachment
 				runtimeNode.get());
 			const bool reachable =
 				FindObject(a_treeRoot, runtimeName) == runtimeNode.get();
+			const bool effectParentSet =
+				effectRoot->parent == runtimeNode.get();
+			const bool runtimeHasEffect = ParentContainsChild(
+				runtimeNode.get(),
+				effectRoot.get());
+			const auto geometry = InspectGeometry(effectRoot.get());
 
-			if (parentSet && parentHasChild && reachable) {
+			if (parentSet && parentHasChild && reachable &&
+				effectParentSet && runtimeHasEffect) {
+
 				++result.attached;
 			}
 			else {
 				++result.loadFailed;
 			}
 
-			if (parentSet && parentHasChild && reachable) {
+			if (parentSet && parentHasChild && reachable &&
+				effectParentSet && runtimeHasEffect) {
+
 				REX::INFO(
 					"[Smoking Guns][RuntimeAttachment] "
 					"{} attach verification for '{}' as '{}': "
 					"parent='{}', children={}, parentSet={}, "
 					"parentHasChild={}, reachable={}, "
+					"template={:p}, clone={:p}, "
+					"effectParentSet={}, runtimeHasEffect={}, "
+					"geometry=(total={}, visible={}, registered={}, "
+					"rendererReady={}), "
 					"pointPosition=({:.3f}, {:.3f}, {:.3f}), "
 					"pointScale={:.3f}",
 					a_treeLabel,
@@ -438,6 +560,14 @@ namespace SmokingGuns::RuntimeAttachment
 					parentSet,
 					parentHasChild,
 					reachable,
+					static_cast<void*>(effectTemplate.get()),
+					static_cast<void*>(effectRoot.get()),
+					effectParentSet,
+					runtimeHasEffect,
+					geometry.total,
+					geometry.visible,
+					geometry.registered,
+					geometry.rendererReady,
 					located.point->position.x,
 					located.point->position.y,
 					located.point->position.z,
@@ -449,6 +579,10 @@ namespace SmokingGuns::RuntimeAttachment
 					"{} attach verification for '{}' as '{}': "
 					"parent='{}', children={}, parentSet={}, "
 					"parentHasChild={}, reachable={}, "
+					"template={:p}, clone={:p}, "
+					"effectParentSet={}, runtimeHasEffect={}, "
+					"geometry=(total={}, visible={}, registered={}, "
+					"rendererReady={}), "
 					"pointPosition=({:.3f}, {:.3f}, {:.3f}), "
 					"pointScale={:.3f}",
 					a_treeLabel,
@@ -459,6 +593,14 @@ namespace SmokingGuns::RuntimeAttachment
 					parentSet,
 					parentHasChild,
 					reachable,
+					static_cast<void*>(effectTemplate.get()),
+					static_cast<void*>(effectRoot.get()),
+					effectParentSet,
+					runtimeHasEffect,
+					geometry.total,
+					geometry.visible,
+					geometry.registered,
+					geometry.rendererReady,
 					located.point->position.x,
 					located.point->position.y,
 					located.point->position.z,
