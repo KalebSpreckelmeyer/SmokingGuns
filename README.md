@@ -34,6 +34,30 @@ P-SG_MuzzleCenter = SmokingGuns\Effects\MuzzleSmoke.nif  # inline comments work
 
 The section identifies the weapon by plugin and local FormID. Each entry maps an authored Parent Attach Point to an effect NIF path relative to `Data\Meshes`. Repeating a locator for the same weapon replaces its earlier mapping.
 
+### Reload smoke
+
+Add `ReloadMode = Explicit` for a weapon whose animations contain purpose-authored smoke timing annotations, or `ReloadMode = Timed` for fallback timing from vanilla reload annotations plus delays authored in the behavior graph or effect NIF. Omitting `ReloadMode` (or specifying `None`) disables both reload paths. The plugin does not interpret animation annotations or schedule particle bursts itself; the weapon behavior graph must do that work.
+
+```ini
+[SomeWeapon.esp|001234]
+ReloadMode = Explicit
+P-SG_EjectionPort = SmokingGuns\Effects\EjectionPortSmoke.nif
+```
+
+The plugin writes two **integer** variables to each available weapon graph on its periodic reconciliation tick:
+
+| Mode | `SG_Reload_Enabled` | `SG_Reload_Explicit` |
+| --- | ---: | ---: |
+| Omitted / `None` | 0 | 0 |
+| `Timed` | 1 | 0 |
+| `Explicit` | 1 | 1 |
+
+Declare both as integer graph variables with default 0. Gate the explicitly annotated reload branch on `SG_Reload_Enabled == 1 && SG_Reload_Explicit == 1`; gate the vanilla-annotation fallback on `SG_Reload_Enabled == 1 && SG_Reload_Explicit == 0`. Both branches may address the same configured effect NIF if it has the needed controller sequences. The profile's `P-SG_*` entries specify the effect files and locations; the behavior graph chooses when and which sequence fires. There is no reload emission when the mode is absent, provided the graph applies these gates.
+
+### Repeated locators on assembled parts
+
+When several installed components expose the same `P-SG_*` Parent Attach Point, the injector selects the deepest valid matching parent in the live first- or third-person scene tree. If a rebuild changes the preferred point, it moves its retained runtime node to that point. Equal-depth matches remain ambiguous: it selects the first in stable child order and logs a warning. In particular, receiver, barrel, and muzzle components may be siblings in an assembled tree. Verify their actual hierarchy in game before relying on automatic muzzle precedence; depth alone cannot identify a muzzle among siblings.
+
 ## Effect NIF Authoring
 
 Effect NIFs are loaded as model-database templates and cloned into independent first- and third-person instances. The runtime wrapper supplies the Parent Attach Point transform, so the effect should be authored around local origin and does not need its own matching Child Attach Point or Creation Kit record.

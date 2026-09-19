@@ -142,6 +142,42 @@ namespace SmokingGuns
 		return status;
 	}
 
+	bool GraphManager::TrySetIntVariable(
+		RE::PlayerCharacter* a_player,
+		bool a_firstPerson,
+		const char* a_variableName,
+		std::int32_t a_value)
+	{
+		if (!a_player || !a_variableName) {
+			return false;
+		}
+
+		const auto& biped = a_player->GetBiped(a_firstPerson);
+		if (!biped) {
+			return false;
+		}
+
+		const auto* weaponObject = biped->GetBipObject(
+			RE::BIPED_OBJECT::kWeaponGun);
+		if (!weaponObject || !weaponObject->objectGraphManager) {
+			return false;
+		}
+
+		return weaponObject->objectGraphManager->SetGraphVariableInt(
+			RE::BSFixedString{ a_variableName }, a_value);
+	}
+
+	GraphWriteStatus GraphManager::SetIntVariable(
+		RE::PlayerCharacter* a_player,
+		const char* a_variableName,
+		std::int32_t a_value)
+	{
+		return {
+			TrySetIntVariable(a_player, true, a_variableName, a_value),
+			TrySetIntVariable(a_player, false, a_variableName, a_value)
+		};
+	}
+
 	bool GraphManager::TryReadFloatVariable(
 		RE::PlayerCharacter* a_player,
 		bool a_firstPerson,

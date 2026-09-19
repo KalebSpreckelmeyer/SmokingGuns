@@ -20,6 +20,10 @@ namespace SmokingGuns::RuntimeAttachment
 		{
 			RE::NiNode* parent{ nullptr };
 			const RE::BSConnectPoint::Parents::ConnectPoint* point{ nullptr };
+			std::size_t depth{ 0 };
+			std::size_t matchesAtDepth{ 0 };
+			std::string selectedOwner;
+			std::vector<std::string> competingOwners;
 		};
 
 		struct RetainedAttachment
@@ -158,8 +162,8 @@ namespace SmokingGuns::RuntimeAttachment
 				return {};
 			}
 
-			std::vector<RE::NiAVObject*> pending;
-			pending.push_back(a_treeRoot);
+			std::vector<RE::NiAVObject*> pending{ a_treeRoot };
+			LocatedConnectPoint selected{};
 
 			const RE::BSFixedString cpaName{ "CPA" };
 
@@ -208,7 +212,28 @@ namespace SmokingGuns::RuntimeAttachment
 							continue;
 						}
 
-						return { parentNode, point };
+						// Rank by the actual attachment node, which may be a
+						// named descendant of the component owning the CPA.
+						std::size_t parentDepth = 0;
+						for (auto* ancestor = static_cast<RE::NiAVObject*>(parentNode);
+							ancestor && ancestor != a_treeRoot;
+							ancestor = ancestor->parent) {
+							++parentDepth;
+						}
+
+						if (!selected.point || parentDepth > selected.depth) {
+							selected = {
+								parentNode, point, parentDepth, 1,
+								owner->name.c_str(), {}
+							};
+						}
+						else if (parentDepth == selected.depth) {
+							// Equal-depth components are not ordered by
+							// attachment hierarchy. Keep the first stable match.
+							++selected.matchesAtDepth;
+							selected.competingOwners.emplace_back(
+								owner->name.c_str());
+						}
 					}
 				}
 
@@ -219,13 +244,14 @@ namespace SmokingGuns::RuntimeAttachment
 				}
 
 				for (auto& child : node->children) {
-					if (child) {
+					if (child && !std::string_view{ child->name.c_str() }
+						.starts_with(kRuntimePrefix)) {
 						pending.push_back(child.get());
 					}
 				}
 			}
 
-			return {};
+			return selected;
 		}
 
 		RE::NiPointer<RE::NiNode> LoadEffectTemplate(
@@ -357,10 +383,16 @@ namespace SmokingGuns::RuntimeAttachment
 		}
 
 		for (const auto& requirement : a_profile.effects) {
-			if (!FindObject(
+			const auto* existing = FindObject(
 				a_treeRoot,
 				MakeRuntimeNodeName(
-					requirement.attachPoint))) {
+					requirement.attachPoint));
+			const auto located = FindConnectPoint(
+				a_treeRoot, requirement.attachPoint);
+			if (!existing || !located.parent || !located.point ||
+				existing->parent != located.parent ||
+				existing->local.translate != located.point->position ||
+				existing->local.scale != located.point->scale) {
 
 				return false;
 			}
@@ -398,8 +430,83 @@ namespace SmokingGuns::RuntimeAttachment
 				MakeRuntimeNodeName(
 					requirement.attachPoint);
 
-			if (FindObject(a_treeRoot, runtimeName)) {
-				++result.alreadyPresent;
+			const auto located = FindConnectPoint(
+				a_treeRoot, requirement.attachPoint);
+
+			if (!located.parent || !located.point) {
+				++result.locatorMissing;
+				REX::WARN(
+					"[Smoking Guns][RuntimeAttachment] "
+					"{} locator '{}' was not found in the live tree",
+					a_treeLabel, requirement.attachPoint);
+				continue;
+			}
+
+			if (located.matchesAtDepth > 1) {
+				REX::WARN(
+					"[Smoking Guns][RuntimeAttachment] "
+					"{} locator '{}' has {} matches at the preferred "
+					"depth {}; using owner '{}' (parent '{}')",
+					a_treeLabel, requirement.attachPoint,
+					located.matchesAtDepth, located.depth,
+					located.selectedOwner,
+					located.parent->name.c_str());
+				for (const auto& competitor : located.competingOwners) {
+				REX::DEBUG(
+					"[Smoking Guns][RuntimeAttachment] "
+					"{} locator '{}' also found on owner '{}'",
+					a_treeLabel, requirement.attachPoint, competitor);
+				}
+			}
+
+			if (auto* existing = FindObject(a_treeRoot, runtimeName)) {
+				if (existing->parent == located.parent &&
+					existing->local.translate == located.point->position &&
+					existing->local.scale == located.point->scale) {
+					++result.alreadyPresent;
+					continue;
+				}
+
+				auto* retained = FindRetainedAttachment(a_treeRoot, runtimeName);
+				if (!retained || retained->runtimeNode.get() != existing ||
+					!existing->parent || !existing->IsNode()) {
+					++result.loadFailed;
+					REX::ERROR(
+						"[Smoking Guns][RuntimeAttachment] "
+						"{} cannot move unowned runtime node '{}'",
+						a_treeLabel, runtimeName);
+					continue;
+				}
+
+				auto* runtimeNode = existing->IsNode();
+				auto* oldParent = existing->parent;
+				oldParent->DetachChild(runtimeNode);
+				runtimeNode->local.translate = located.point->position;
+				runtimeNode->local.rotate =
+					QuaternionToMatrix(located.point->rotation);
+				runtimeNode->local.scale = located.point->scale;
+				RE::NiUpdateData updateData{};
+				runtimeNode->PreAttachUpdate(located.parent, updateData);
+				located.parent->AttachChild(runtimeNode, true);
+				runtimeNode->PostAttachUpdate();
+				runtimeNode->UpdateTransformAndBounds(updateData);
+				oldParent->UpdateUpwardPass(updateData);
+				located.parent->UpdateUpwardPass(updateData);
+				if (runtimeNode->parent == located.parent &&
+					ParentContainsChild(located.parent, runtimeNode)) {
+					++result.attached;
+					REX::INFO(
+						"[Smoking Guns][RuntimeAttachment] "
+						"{} moved '{}' to preferred locator under '{}'",
+						a_treeLabel, runtimeName, located.parent->name.c_str());
+				}
+				else {
+					++result.loadFailed;
+					REX::ERROR(
+						"[Smoking Guns][RuntimeAttachment] "
+						"{} failed to move '{}' to preferred locator",
+						a_treeLabel, runtimeName);
+				}
 				continue;
 			}
 
@@ -412,22 +519,6 @@ namespace SmokingGuns::RuntimeAttachment
 					"{} replacing detached runtime node '{}'",
 					a_treeLabel,
 					runtimeName);
-			}
-
-			const auto located = FindConnectPoint(
-				a_treeRoot,
-				requirement.attachPoint);
-
-			if (!located.parent || !located.point) {
-				++result.locatorMissing;
-
-				REX::WARN(
-					"[Smoking Guns][RuntimeAttachment] "
-					"{} locator '{}' was not found in the live tree",
-					a_treeLabel,
-					requirement.attachPoint);
-
-				continue;
 			}
 
 			auto effectTemplate =

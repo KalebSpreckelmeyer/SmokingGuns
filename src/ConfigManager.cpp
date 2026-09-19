@@ -639,6 +639,26 @@ namespace SmokingGuns
 				const std::string nifPath =
 					Unquote(line.substr(equalsPosition + 1));
 
+				if (attachPoint == "ReloadMode") {
+					auto& mode = weaponProfiles[*currentWeaponFormID].reloadMode;
+					if (nifPath == "Explicit") {
+						mode = ReloadMode::kExplicit;
+					}
+					else if (nifPath == "Timed") {
+						mode = ReloadMode::kTimed;
+					}
+					else if (nifPath == "None") {
+						mode = ReloadMode::kNone;
+					}
+					else {
+						REX::WARN(
+							"[Smoking Guns] Invalid ReloadMode '{}' on line "
+							"{} in {} (expected None, Explicit or Timed)",
+							nifPath, lineNumber, path.filename().string());
+					}
+					continue;
+				}
+
 				if (!attachPoint.starts_with("P-SG_") ||
 					nifPath.empty()) {
 

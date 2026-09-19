@@ -47,6 +47,11 @@ namespace SmokingGuns
 			const char* a_variableName,
 			float a_value);
 
+		static GraphWriteStatus SetIntVariable(
+			RE::PlayerCharacter* a_player,
+			const char* a_variableName,
+			std::int32_t a_value);
+
 		static GraphWriteStatus ReadFloatVariable(
 			RE::PlayerCharacter* a_player,
 			const char* a_variableName,
@@ -64,6 +69,12 @@ namespace SmokingGuns
 			bool a_firstPerson,
 			const char* a_variableName,
 			float a_value);
+
+		static bool TrySetIntVariable(
+			RE::PlayerCharacter* a_player,
+			bool a_firstPerson,
+			const char* a_variableName,
+			std::int32_t a_value);
 
 		static bool TryReadFloatVariable(
 			RE::PlayerCharacter* a_player,

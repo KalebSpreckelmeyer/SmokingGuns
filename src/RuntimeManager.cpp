@@ -1,6 +1,7 @@
 #include "RuntimeManager.h"
 
 #include "ConfigManager.h"
+#include "GraphManager.h"
 #include "RuntimeAttachment.h"
 #include "SmokeFollowTest.h"
 
@@ -130,6 +131,17 @@ namespace SmokingGuns
 		const auto* profile =
 			ConfigManager::GetSingleton().GetWeaponProfile(weapon);
 
+		// Write both flags on every reconciliation tick. Graphs may be rebuilt
+		// while the weapon FormID and player roots remain unchanged.
+		const auto reloadMode = profile ?
+			profile->reloadMode : ReloadMode::kNone;
+		const auto enabledWrite = GraphManager::SetIntVariable(
+			player, "SG_Reload_Enabled",
+			reloadMode == ReloadMode::kNone ? 0 : 1);
+		const auto explicitWrite = GraphManager::SetIntVariable(
+			player, "SG_Reload_Explicit",
+			reloadMode == ReloadMode::kExplicit ? 1 : 0);
+
 		if (!profile || profile->effects.empty()) {
 			RuntimeAttachment::ReleaseRetainedAttachments();
 			observedWeaponFormID = weapon->GetFormID();
@@ -143,6 +155,20 @@ namespace SmokingGuns
 
 		const bool weaponChanged =
 			observedWeaponFormID != weapon->GetFormID();
+
+		if (weaponChanged) {
+			REX::INFO(
+				"[Smoking Guns][RuntimeManager] "
+				"ReloadMode={} for {:08X}; graph writes "
+				"1P=({}, {}), 3P=({}, {})",
+				reloadMode == ReloadMode::kExplicit ? "Explicit" :
+					reloadMode == ReloadMode::kTimed ? "Timed" : "None",
+				weapon->GetFormID(),
+				enabledWrite.firstPersonWritten,
+				explicitWrite.firstPersonWritten,
+				enabledWrite.thirdPersonWritten,
+				explicitWrite.thirdPersonWritten);
+		}
 
 		if (weaponChanged) {
 			RuntimeAttachment::ReleaseRetainedAttachments();

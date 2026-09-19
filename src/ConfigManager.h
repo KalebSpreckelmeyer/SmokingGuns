@@ -9,6 +9,13 @@
 
 namespace SmokingGuns
 {
+	enum class ReloadMode
+	{
+		kNone,
+		kExplicit,
+		kTimed
+	};
+
 	struct EffectRequirement
 	{
 		std::string attachPoint;
@@ -18,6 +25,7 @@ namespace SmokingGuns
 	struct WeaponProfile
 	{
 		std::vector<EffectRequirement> effects;
+		ReloadMode reloadMode{ ReloadMode::kNone };
 
 		// Transitional storage for the retired OMOD experiment.  The new
 		// profile parser never populates this collection; it remains only so
