@@ -154,6 +154,33 @@ namespace SmokingGuns::RuntimeAttachment
 				RE::BSFixedString{ a_name.c_str() });
 		}
 
+		bool IsReachableFromRoot(
+			const RE::NiAVObject* a_root,
+			const RE::NiAVObject* a_object)
+		{
+			for (auto* ancestor = a_object;
+				ancestor;
+				ancestor = ancestor->parent) {
+				if (ancestor == a_root) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		RE::NiAVObject* FindRuntimeNode(
+			RE::NiAVObject* a_root,
+			const std::string& a_name)
+		{
+			if (const auto* retained = FindRetainedAttachment(a_root, a_name);
+				retained && retained->runtimeNode &&
+				IsReachableFromRoot(a_root, retained->runtimeNode.get())) {
+				return retained->runtimeNode.get();
+			}
+
+			return FindObject(a_root, a_name);
+		}
+
 		LocatedConnectPoint FindConnectPoint(
 			RE::NiAVObject* a_treeRoot,
 			const std::string& a_attachPoint)
@@ -353,16 +380,19 @@ namespace SmokingGuns::RuntimeAttachment
 	}
 
 	std::string MakeRuntimeNodeName(
-		const std::string& a_attachPoint)
+		const EffectRequirement& a_requirement)
 	{
+		const auto& a_attachPoint = a_requirement.attachPoint;
+		std::string runtimeName;
 		if (a_attachPoint.starts_with(kLocatorPrefix)) {
-			return std::string{ kRuntimePrefix } +
+			runtimeName = std::string{ kRuntimePrefix } +
 				a_attachPoint.substr(kLocatorPrefix.size());
 		}
+		else {
+			runtimeName = std::string{ kRuntimePrefix } + a_attachPoint;
+		}
 
-		std::string sanitized = a_attachPoint;
-
-		for (auto& character : sanitized) {
+		for (auto& character : runtimeName) {
 			if (!std::isalnum(
 				static_cast<unsigned char>(character)) &&
 				character != '_') {
@@ -371,7 +401,19 @@ namespace SmokingGuns::RuntimeAttachment
 			}
 		}
 
-		return std::string{ kRuntimePrefix } + sanitized;
+		if (!a_requirement.instance.empty()) {
+			runtimeName += '_';
+			for (auto character : a_requirement.instance) {
+				if (!std::isalnum(
+					static_cast<unsigned char>(character)) &&
+					character != '_') {
+					character = '_';
+				}
+				runtimeName += character;
+			}
+		}
+
+		return runtimeName;
 	}
 
 	bool HasRequiredNodes(
@@ -383,10 +425,9 @@ namespace SmokingGuns::RuntimeAttachment
 		}
 
 		for (const auto& requirement : a_profile.effects) {
-			const auto* existing = FindObject(
+			const auto* existing = FindRuntimeNode(
 				a_treeRoot,
-				MakeRuntimeNodeName(
-					requirement.attachPoint));
+				MakeRuntimeNodeName(requirement));
 			const auto located = FindConnectPoint(
 				a_treeRoot, requirement.attachPoint);
 			if (!existing || !located.parent || !located.point ||
@@ -426,9 +467,7 @@ namespace SmokingGuns::RuntimeAttachment
 		}
 
 		for (const auto& requirement : a_profile.effects) {
-			const auto runtimeName =
-				MakeRuntimeNodeName(
-					requirement.attachPoint);
+			const auto runtimeName = MakeRuntimeNodeName(requirement);
 
 			const auto located = FindConnectPoint(
 				a_treeRoot, requirement.attachPoint);
@@ -459,7 +498,7 @@ namespace SmokingGuns::RuntimeAttachment
 				}
 			}
 
-			if (auto* existing = FindObject(a_treeRoot, runtimeName)) {
+			if (auto* existing = FindRuntimeNode(a_treeRoot, runtimeName)) {
 				if (existing->parent == located.parent &&
 					existing->local.translate == located.point->position &&
 					existing->local.scale == located.point->scale) {
@@ -473,12 +512,34 @@ namespace SmokingGuns::RuntimeAttachment
 					++result.loadFailed;
 					REX::ERROR(
 						"[Smoking Guns][RuntimeAttachment] "
-						"{} cannot move unowned runtime node '{}'",
-						a_treeLabel, runtimeName);
+						"{} cannot move unowned runtime node '{}': "
+						"found={:p}, retained={:p}, parent={:p}, "
+						"preferred={:p}",
+						a_treeLabel, runtimeName,
+						static_cast<void*>(existing),
+						static_cast<void*>(retained ?
+							retained->runtimeNode.get() : nullptr),
+						static_cast<void*>(existing->parent),
+						static_cast<void*>(located.parent));
 					continue;
 				}
 
 				auto* runtimeNode = existing->IsNode();
+				if (runtimeNode->parent == located.parent) {
+					// The selected part has not changed. Only its connect
+					// point transform differs; detaching would interrupt
+					// any currently playing controller sequence.
+					runtimeNode->local.translate = located.point->position;
+					runtimeNode->local.rotate =
+						QuaternionToMatrix(located.point->rotation);
+					runtimeNode->local.scale = located.point->scale;
+					RE::NiUpdateData updateData{};
+					runtimeNode->UpdateTransformAndBounds(updateData);
+					located.parent->UpdateUpwardPass(updateData);
+					++result.attached;
+					continue;
+				}
+
 				auto* oldParent = existing->parent;
 				oldParent->DetachChild(runtimeNode);
 				runtimeNode->local.translate = located.point->position;
@@ -565,7 +626,7 @@ namespace SmokingGuns::RuntimeAttachment
 				located.parent,
 				runtimeNode.get());
 			const bool reachable =
-				FindObject(a_treeRoot, runtimeName) == runtimeNode.get();
+				IsReachableFromRoot(a_treeRoot, runtimeNode.get());
 			const bool effectParentSet =
 				effectRoot->parent == runtimeNode.get();
 			const bool runtimeHasEffect = ParentContainsChild(

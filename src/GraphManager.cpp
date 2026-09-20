@@ -178,6 +178,16 @@ namespace SmokingGuns
 		};
 	}
 
+	bool GraphManager::SetIntVariableForView(
+		RE::PlayerCharacter* a_player,
+		bool a_firstPerson,
+		const char* a_variableName,
+		std::int32_t a_value)
+	{
+		return TrySetIntVariable(
+			a_player, a_firstPerson, a_variableName, a_value);
+	}
+
 	bool GraphManager::TryReadFloatVariable(
 		RE::PlayerCharacter* a_player,
 		bool a_firstPerson,

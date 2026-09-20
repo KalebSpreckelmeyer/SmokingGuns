@@ -633,13 +633,13 @@ namespace SmokingGuns
 					continue;
 				}
 
-				const std::string attachPoint =
+				const std::string profileKey =
 					Trim(line.substr(0, equalsPosition));
 
 				const std::string nifPath =
 					Unquote(line.substr(equalsPosition + 1));
 
-				if (attachPoint == "ReloadMode") {
+				if (profileKey == "ReloadMode") {
 					auto& mode = weaponProfiles[*currentWeaponFormID].reloadMode;
 					if (nifPath == "Explicit") {
 						mode = ReloadMode::kExplicit;
@@ -659,7 +659,7 @@ namespace SmokingGuns
 					continue;
 				}
 
-				if (!attachPoint.starts_with("P-SG_") ||
+				if (!profileKey.starts_with("P-SG_") ||
 					nifPath.empty()) {
 
 					REX::WARN(
@@ -672,27 +672,41 @@ namespace SmokingGuns
 					continue;
 				}
 
+				const auto separator = profileKey.find('.', 4);
+				const std::string attachPoint = separator == std::string::npos ?
+					profileKey : profileKey.substr(0, separator);
+				const std::string instance = separator == std::string::npos ?
+					std::string{} : Trim(profileKey.substr(separator + 1));
+				if (attachPoint.size() <= 4 ||
+					(separator != std::string::npos && instance.empty())) {
+					REX::WARN(
+						"[Smoking Guns] Invalid effect key on line {} in {}: {}",
+						lineNumber, path.filename().string(), line);
+					continue;
+				}
+
 				auto& requirements =
 					weaponProfiles[*currentWeaponFormID].effects;
 
 				const auto existing = std::find_if(
 					requirements.begin(),
 					requirements.end(),
-					[&attachPoint](const EffectRequirement& a_entry) {
-						return a_entry.attachPoint == attachPoint;
+					[&attachPoint, &instance](const EffectRequirement& a_entry) {
+						return a_entry.attachPoint == attachPoint &&
+							a_entry.instance == instance;
 					});
 
 				if (existing != requirements.end()) {
 					REX::WARN(
 						"[Smoking Guns] Replacing duplicate requirement '{}' "
 						"for weapon {:08X}",
-						attachPoint,
+						profileKey,
 						*currentWeaponFormID);
 
 					existing->nifPath = nifPath;
 				}
 				else {
-					requirements.push_back({ attachPoint, nifPath });
+					requirements.push_back({ attachPoint, instance, nifPath });
 					++loadedRequirements;
 				}
 			}

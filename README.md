@@ -32,7 +32,14 @@ P-SG_EjectionPort = SmokingGuns\Effects\EjectionPortTest.nif
 P-SG_MuzzleCenter = SmokingGuns\Effects\MuzzleSmoke.nif  # inline comments work
 ```
 
-The section identifies the weapon by plugin and local FormID. Each entry maps an authored Parent Attach Point to an effect NIF path relative to `Data\Meshes`. Repeating a locator for the same weapon replaces its earlier mapping.
+The section identifies the weapon by plugin and local FormID. Each entry maps an authored Parent Attach Point to an effect NIF path relative to `Data\Meshes`. Repeating the exact same key for the same weapon replaces its earlier mapping. To place multiple effects at one locator, add a dot-suffix identity; the part before the dot remains the physical locator:
+
+```ini
+P-SG_EjectionPort.Fire = SmokingGuns\Effects\SG_WeaponFire_EjectionPort_Small.nif
+P-SG_EjectionPort.Constant = SmokingGuns\Effects\SG_Constant_EjectionPort.nif
+```
+
+Both entries resolve `P-SG_EjectionPort`, but receive independent runtime nodes (`SG_Runtime_EjectionPort_Fire` and `SG_Runtime_EjectionPort_Constant`).
 
 ### Reload smoke
 
@@ -53,6 +60,10 @@ The plugin writes two **integer** variables to each available weapon graph on it
 | `Explicit` | 1 | 1 |
 
 Declare both as integer graph variables with default 0. Gate the explicitly annotated reload branch on `SG_Reload_Enabled == 1 && SG_Reload_Explicit == 1`; gate the vanilla-annotation fallback on `SG_Reload_Enabled == 1 && SG_Reload_Explicit == 0`. Both branches may address the same configured effect NIF if it has the needed controller sequences. The profile's `P-SG_*` entries specify the effect files and locations; the behavior graph chooses when and which sequence fires. There is no reload emission when the mode is absent, provided the graph applies these gates.
+
+### Save-load graph refresh
+
+Declare `SG_GraphRefresh` as an **integer** variable with default 0 in each compatible weapon graph. After loading a save, the plugin writes 0 and then 1 on successive player updates for each available first- and third-person graph with `SG_FrameworkVersion == 1`. If a graph is not ready yet, the plugin retries until it can write the value. Use the transition to 1 to initialize the smoke decay logic, and have the graph reset the variable to 0 after consuming it. Writing 0 first ensures a new transition even if the saved graph variable was already 1.
 
 ### Repeated locators on assembled parts
 

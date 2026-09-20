@@ -19,6 +19,7 @@ namespace SmokingGuns
 	struct EffectRequirement
 	{
 		std::string attachPoint;
+		std::string instance;
 		std::string nifPath;
 	};
 

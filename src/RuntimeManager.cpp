@@ -56,6 +56,14 @@ namespace SmokingGuns
 			"Player update hook installed");
 	}
 
+	void RuntimeManager::OnSaveLoaded()
+	{
+		saveLoadGeneration.fetch_add(1, std::memory_order_relaxed);
+		REX::INFO(
+			"[Smoking Guns][RuntimeManager] "
+			"Save loaded; graph refresh queued");
+	}
+
 	bool RuntimeManager::OnWeaponEquipped(
 		RE::TESObjectWEAP* a_weapon)
 	{
@@ -103,6 +111,60 @@ namespace SmokingGuns
 	void RuntimeManager::Update()
 	{
 		++updateCount;
+
+		const auto generation =
+			saveLoadGeneration.load(std::memory_order_relaxed);
+		if (generation != processedLoadGeneration) {
+			processedLoadGeneration = generation;
+			firstPersonRefresh = GraphRefreshStage::kClear;
+			thirdPersonRefresh = GraphRefreshStage::kClear;
+		}
+
+		// Retry missing graphs on the normal reconciliation cadence, but
+		// advance a successful clear on the next player update for a 0->1 edge.
+		const bool refreshPending =
+			firstPersonRefresh != GraphRefreshStage::kIdle ||
+			thirdPersonRefresh != GraphRefreshStage::kIdle;
+		const bool refreshReadyToSet =
+			firstPersonRefresh == GraphRefreshStage::kSet ||
+			thirdPersonRefresh == GraphRefreshStage::kSet;
+		if (refreshPending &&
+			(refreshReadyToSet ||
+			(updateCount % kPeriodicReconcileFrames) == 0)) {
+			auto* player = RE::PlayerCharacter::GetSingleton();
+			if (player) {
+				const auto compatible = GraphManager::DetectFramework(player);
+				const auto advance = [&](bool a_firstPerson,
+					GraphRefreshStage& a_stage, bool a_compatible) {
+					if (!a_compatible || a_stage == GraphRefreshStage::kIdle) {
+						return;
+					}
+					const auto value =
+						a_stage == GraphRefreshStage::kClear ? 0 : 1;
+					if (!GraphManager::SetIntVariableForView(
+						player, a_firstPerson, "SG_GraphRefresh", value)) {
+						return;
+					}
+					if (a_stage == GraphRefreshStage::kClear) {
+						a_stage = GraphRefreshStage::kSet;
+					}
+					else {
+						a_stage = GraphRefreshStage::kIdle;
+						REX::INFO(
+							"[Smoking Guns][RuntimeManager] "
+							"SG_GraphRefresh=1 written to {} weapon graph",
+							a_firstPerson ? "1P" : "3P");
+					}
+				};
+
+				advance(true, firstPersonRefresh,
+					compatible.firstPersonFound &&
+					compatible.firstPersonVersion == 1);
+				advance(false, thirdPersonRefresh,
+					compatible.thirdPersonFound &&
+					compatible.thirdPersonVersion == 1);
+			}
+		}
 
 		if (!forceReconcile &&
 			(updateCount % kPeriodicReconcileFrames) != 0) {

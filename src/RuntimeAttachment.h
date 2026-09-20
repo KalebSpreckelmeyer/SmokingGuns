@@ -23,7 +23,7 @@ namespace SmokingGuns::RuntimeAttachment
 	};
 
 	[[nodiscard]] std::string MakeRuntimeNodeName(
-		const std::string& a_attachPoint);
+		const EffectRequirement& a_requirement);
 
 	[[nodiscard]] bool HasRequiredNodes(
 		RE::NiAVObject* a_treeRoot,

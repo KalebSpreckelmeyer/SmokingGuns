@@ -211,7 +211,9 @@ namespace Papyrus
 			for (const auto& effect : weaponProfile->effects) {
 				REX::DEBUG(
 					"[Smoking Guns] Runtime effect: '{}' -> '{}'",
-					effect.attachPoint,
+					effect.attachPoint +
+						(effect.instance.empty() ? std::string{} :
+							"." + effect.instance),
 					effect.nifPath);
 			}
 		}
@@ -439,6 +441,11 @@ namespace
 		}
 
 		switch (a_message->type) {
+		case F4SE::MessagingInterface::kPostLoadGame:
+			SmokingGuns::RuntimeManager::GetSingleton()
+				.OnSaveLoaded();
+			break;
+
 		case F4SE::MessagingInterface::kGameDataReady:
 			REX::INFO("[Smoking Guns] Received GameDataReady");
 

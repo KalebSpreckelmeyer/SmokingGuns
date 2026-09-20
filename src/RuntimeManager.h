@@ -2,6 +2,7 @@
 
 #include <RE/Fallout.h>
 
+#include <atomic>
 #include <cstdint>
 
 namespace SmokingGuns
@@ -13,6 +14,7 @@ namespace SmokingGuns
 
 		void InstallUpdateHook();
 		void Update();
+		void OnSaveLoaded();
 
 		bool OnWeaponEquipped(RE::TESObjectWEAP* a_weapon);
 
@@ -21,6 +23,18 @@ namespace SmokingGuns
 
 		RE::TESObjectWEAP* ResolveEquippedWeapon(
 			RE::PlayerCharacter* a_player) const;
+
+		enum class GraphRefreshStage
+		{
+			kIdle,
+			kClear,
+			kSet
+		};
+
+		std::atomic<std::uint64_t> saveLoadGeneration{ 0 };
+		std::uint64_t processedLoadGeneration{ 0 };
+		GraphRefreshStage firstPersonRefresh{ GraphRefreshStage::kIdle };
+		GraphRefreshStage thirdPersonRefresh{ GraphRefreshStage::kIdle };
 
 		std::uint32_t observedWeaponFormID{ 0 };
 		const RE::NiAVObject* observedFirstPersonRoot{ nullptr };

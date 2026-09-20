@@ -52,6 +52,12 @@ namespace SmokingGuns
 			const char* a_variableName,
 			std::int32_t a_value);
 
+		static bool SetIntVariableForView(
+			RE::PlayerCharacter* a_player,
+			bool a_firstPerson,
+			const char* a_variableName,
+			std::int32_t a_value);
+
 		static GraphWriteStatus ReadFloatVariable(
 			RE::PlayerCharacter* a_player,
 			const char* a_variableName,
