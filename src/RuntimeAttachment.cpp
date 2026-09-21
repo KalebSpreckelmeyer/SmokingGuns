@@ -35,6 +35,52 @@ namespace SmokingGuns::RuntimeAttachment
 
 		std::vector<RetainedAttachment> retainedAttachments;
 
+		enum class IssueKind
+		{
+			kMissingLocator,
+			kAmbiguousLocator,
+			kNifLoad
+		};
+
+		struct ReportedIssue
+		{
+			RE::NiAVObject* treeRoot;
+			std::string key;
+			IssueKind kind;
+		};
+
+		std::vector<ReportedIssue> reportedIssues;
+
+		bool ReportIssueOnce(
+			RE::NiAVObject* a_treeRoot,
+			const std::string& a_key,
+			IssueKind a_kind)
+		{
+			const auto found = std::ranges::find_if(
+				reportedIssues,
+				[&](const ReportedIssue& a_issue) {
+					return a_issue.treeRoot == a_treeRoot &&
+						a_issue.key == a_key && a_issue.kind == a_kind;
+				});
+			if (found != reportedIssues.end()) {
+				return false;
+			}
+			reportedIssues.push_back({ a_treeRoot, a_key, a_kind });
+			return true;
+		}
+
+		void ClearIssue(
+			RE::NiAVObject* a_treeRoot,
+			const std::string& a_key,
+			IssueKind a_kind)
+		{
+			std::erase_if(reportedIssues,
+				[&](const ReportedIssue& a_issue) {
+					return a_issue.treeRoot == a_treeRoot &&
+						a_issue.key == a_key && a_issue.kind == a_kind;
+				});
+		}
+
 		RetainedAttachment* FindRetainedAttachment(
 			RE::NiAVObject* a_treeRoot,
 			const std::string& a_runtimeName)
@@ -104,9 +150,11 @@ namespace SmokingGuns::RuntimeAttachment
 					1.0F / std::sqrt(lengthSquared);
 
 				w *= inverseLength;
-				x *= inverseLength;
-				y *= inverseLength;
-				z *= inverseLength;
+				// CPA rotations must be inverted when applied as NiNode
+				// local rotations. An identity locator stays unchanged.
+				x *= -inverseLength;
+				y *= -inverseLength;
+				z *= -inverseLength;
 			}
 			else {
 				return RE::NiMatrix3{
@@ -282,7 +330,8 @@ namespace SmokingGuns::RuntimeAttachment
 		}
 
 		RE::NiPointer<RE::NiNode> LoadEffectTemplate(
-			const std::string& a_nifPath)
+			const std::string& a_nifPath,
+			std::uint32_t& a_error)
 		{
 			std::string normalizedPath = a_nifPath;
 
@@ -303,16 +352,10 @@ namespace SmokingGuns::RuntimeAttachment
 				normalizedPath.c_str(),
 				std::addressof(effectRoot),
 				args);
+			a_error = static_cast<std::uint32_t>(result);
 
 			if (result != RE::BSResource::ErrorCode::kNone ||
 				!effectRoot) {
-
-				REX::ERROR(
-					"[Smoking Guns][RuntimeAttachment] "
-					"Could not load effect NIF '{}' (error={})",
-					normalizedPath,
-					static_cast<std::uint32_t>(result));
-
 				return nullptr;
 			}
 
@@ -433,6 +476,7 @@ namespace SmokingGuns::RuntimeAttachment
 			if (!existing || !located.parent || !located.point ||
 				existing->parent != located.parent ||
 				existing->local.translate != located.point->position ||
+				existing->local.rotate != QuaternionToMatrix(located.point->rotation) ||
 				existing->local.scale != located.point->scale) {
 
 				return false;
@@ -452,6 +496,7 @@ namespace SmokingGuns::RuntimeAttachment
 		}
 
 		retainedAttachments.clear();
+		reportedIssues.clear();
 	}
 
 	ReconcileResult ReconcileTree(
@@ -474,14 +519,21 @@ namespace SmokingGuns::RuntimeAttachment
 
 			if (!located.parent || !located.point) {
 				++result.locatorMissing;
-				REX::WARN(
-					"[Smoking Guns][RuntimeAttachment] "
-					"{} locator '{}' was not found in the live tree",
-					a_treeLabel, requirement.attachPoint);
+				if (ReportIssueOnce(a_treeRoot, requirement.attachPoint,
+					IssueKind::kMissingLocator)) {
+					REX::WARN(
+						"[Smoking Guns][RuntimeAttachment] "
+						"{} locator '{}' was not found in the live tree",
+						a_treeLabel, requirement.attachPoint);
+				}
 				continue;
 			}
+			ClearIssue(a_treeRoot, requirement.attachPoint,
+				IssueKind::kMissingLocator);
 
-			if (located.matchesAtDepth > 1) {
+			if (located.matchesAtDepth > 1 &&
+				ReportIssueOnce(a_treeRoot, requirement.attachPoint,
+					IssueKind::kAmbiguousLocator)) {
 				REX::WARN(
 					"[Smoking Guns][RuntimeAttachment] "
 					"{} locator '{}' has {} matches at the preferred "
@@ -497,10 +549,15 @@ namespace SmokingGuns::RuntimeAttachment
 					a_treeLabel, requirement.attachPoint, competitor);
 				}
 			}
+			if (located.matchesAtDepth <= 1) {
+				ClearIssue(a_treeRoot, requirement.attachPoint,
+					IssueKind::kAmbiguousLocator);
+			}
 
 			if (auto* existing = FindRuntimeNode(a_treeRoot, runtimeName)) {
 				if (existing->parent == located.parent &&
 					existing->local.translate == located.point->position &&
+					existing->local.rotate == QuaternionToMatrix(located.point->rotation) &&
 					existing->local.scale == located.point->scale) {
 					++result.alreadyPresent;
 					continue;
@@ -526,8 +583,8 @@ namespace SmokingGuns::RuntimeAttachment
 
 				auto* runtimeNode = existing->IsNode();
 				if (runtimeNode->parent == located.parent) {
-					// The selected part has not changed. Only its connect
-					// point transform differs; detaching would interrupt
+					// The selected part has not changed. Update its connect
+					// point transform in place; detaching would interrupt
 					// any currently playing controller sequence.
 					runtimeNode->local.translate = located.point->position;
 					runtimeNode->local.rotate =
@@ -582,13 +639,22 @@ namespace SmokingGuns::RuntimeAttachment
 					runtimeName);
 			}
 
+			std::uint32_t loadError = 0;
 			auto effectTemplate =
-				LoadEffectTemplate(requirement.nifPath);
+				LoadEffectTemplate(requirement.nifPath, loadError);
 
 			if (!effectTemplate) {
 				++result.loadFailed;
+				if (ReportIssueOnce(a_treeRoot, runtimeName,
+					IssueKind::kNifLoad)) {
+					REX::ERROR(
+						"[Smoking Guns][RuntimeAttachment] "
+						"Could not load effect NIF '{}' (error={})",
+						requirement.nifPath, loadError);
+				}
 				continue;
 			}
+			ClearIssue(a_treeRoot, runtimeName, IssueKind::kNifLoad);
 
 			auto effectRoot = CloneEffect(
 				effectTemplate.get(),

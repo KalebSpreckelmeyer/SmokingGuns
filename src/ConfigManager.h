@@ -5,7 +5,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "RE/B/BGSMod.h"
 
 namespace SmokingGuns
 {
@@ -27,12 +26,6 @@ namespace SmokingGuns
 	{
 		std::vector<EffectRequirement> effects;
 		ReloadMode reloadMode{ ReloadMode::kNone };
-
-		// Transitional storage for the retired OMOD experiment.  The new
-		// profile parser never populates this collection; it remains only so
-		// the old AttachmentManager source can stay buildable while that code
-		// is removed in a later cleanup commit.
-		std::vector<RE::BGSMod::Attachment::Mod*> requiredAttachments;
 	};
 
 	class ConfigManager
@@ -59,7 +52,6 @@ namespace SmokingGuns
 		void LoadGeneralConfig();
 		void LoadAmmoConfigs();
 		void LoadWeaponConfigs();
-		void LoadLegacyWeaponConfigs();
 
 		float ammoMult{ 1.0f };
 		float weightMult{ 1.0f };

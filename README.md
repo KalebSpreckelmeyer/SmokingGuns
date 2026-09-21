@@ -20,6 +20,10 @@ The runtime injector does not require per-emitter OMOD, STAT, MISC, ACTI, Object
 * Keeps smoke calculations and behavior-graph variable writes separate from scene injection.
 * Built with multi-runtime Fallout 4 compatibility in mind.
 
+The runtime checks for rebuilt or missing effect nodes on an equip hint and roughly every 0.5 seconds while the player updates. Locators absent from the currently installed parts and NIF files that cannot load are retried quietly after the first warning for each view; switching weapons or resolving the issue resets the warning.
+
+The player alias script calls `SGNative.ReportEquipped` when a weapon is equipped and after a save loads with a weapon already equipped. That native call computes `SmokeImpulse` and writes `SmokeImpulse` and `SmokeDecayImpulse` to the weapon graphs. `ReportEquipped` is the only Papyrus function this runtime registers.
+
 ## Weapon Profiles
 
 Weapon profiles live in `Data/F4SE/Plugins/SmokingGuns/Weapons/*.ini`.

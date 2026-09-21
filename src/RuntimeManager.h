@@ -3,6 +3,7 @@
 #include <RE/Fallout.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 
 namespace SmokingGuns
@@ -41,7 +42,8 @@ namespace SmokingGuns
 		const RE::NiAVObject* observedThirdPersonRoot{ nullptr };
 
 		std::uint64_t updateCount{ 0 };
-		bool forceReconcile{ false };
+		std::chrono::steady_clock::time_point nextReconcileAt{};
+		std::atomic_bool forceReconcile{ false };
 		bool hookInstalled{ false };
 	};
 }

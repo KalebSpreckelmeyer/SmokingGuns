@@ -4,51 +4,8 @@
 #include "SmokeCalculation.h"
 #include <variant>
 
-#include "SmokeFollowTest.h"
-
 namespace Papyrus
 {
-	bool Ping(std::monostate)
-	{
-		REX::INFO("[Smoking Guns] Ping received from Papyrus");
-		return true;
-	}
-
-	bool StartSmokeFollowTest(
-		std::monostate,
-		RE::TESObjectREFR* a_hostRef)
-	{
-		REX::INFO(
-			"[Smoking Guns][SmokeFollowTest] "
-			"Papyrus StartSmokeFollowTest called, ref={}",
-			a_hostRef ? a_hostRef->GetFormID() : 0);
-
-		return SmokingGuns::SmokeFollowTest::Start(
-			a_hostRef);
-	}
-
-
-	bool UpdateSmokeFollowTest(
-		std::monostate)
-	{
-		REX::INFO(
-			"[Smoking Guns][SmokeFollowTest] "
-			"Papyrus UpdateSmokeFollowTest called");
-
-		return SmokingGuns::SmokeFollowTest::Update();
-	}
-
-
-	bool StopSmokeFollowTest(
-		std::monostate)
-	{
-		REX::INFO(
-			"[Smoking Guns][SmokeFollowTest] "
-			"Papyrus StopSmokeFollowTest called");
-
-		return SmokingGuns::SmokeFollowTest::Stop();
-	}
-
 	bool ReportEquipped(std::monostate, RE::TESForm* a_form)
 	{
 		if (!a_form) {
@@ -357,40 +314,12 @@ namespace Papyrus
 		return true;
 	}
 
-	bool PrepareInventoryWeapon(
-		std::monostate,
-		RE::TESForm* a_form)
-	{
-		if (!a_form) {
-			return false;
-		}
-
-		auto* weapon =
-			a_form->As<RE::TESObjectWEAP>();
-
-		if (!weapon) {
-			return false;
-		}
-
-		// Kept as a compatibility bridge for the existing Papyrus script.
-		// Runtime scene reconciliation replaces inventory/OMOD mutation.
-		return SmokingGuns::RuntimeManager::GetSingleton()
-			.OnWeaponEquipped(weapon);
-	}
-
 	bool RegisterFunctions(RE::BSScript::IVirtualMachine* a_vm)
 	{
 		if (!a_vm) {
 			REX::ERROR("[Smoking Guns] Papyrus VM was null");
 			return false;
 		}
-
-		REX::INFO("[Smoking Guns] Binding Ping");
-
-		a_vm->BindNativeMethod(
-			"SGNative",
-			"Ping",
-			Ping);
 
 		REX::INFO("[Smoking Guns] Binding ReportEquipped");
 
@@ -400,33 +329,6 @@ namespace Papyrus
 			ReportEquipped);
 
 		REX::INFO("[Smoking Guns] Papyrus functions registered");
-
-		REX::INFO(
-			"[Smoking Guns] Binding PrepareInventoryWeapon");
-
-		a_vm->BindNativeMethod(
-			"SGNative",
-			"PrepareInventoryWeapon",
-			PrepareInventoryWeapon);
-
-		REX::INFO("[Smoking Guns] Binding StartSmokeFollowTest");
-		a_vm->BindNativeMethod(
-			"SGNative",
-			"StartSmokeFollowTest",
-			StartSmokeFollowTest);
-
-		REX::INFO("[Smoking Guns] Binding UpdateSmokeFollowTest");
-		a_vm->BindNativeMethod(
-			"SGNative",
-			"UpdateSmokeFollowTest",
-			UpdateSmokeFollowTest);
-
-		REX::INFO("[Smoking Guns] Binding StopSmokeFollowTest");
-		a_vm->BindNativeMethod(
-			"SGNative",
-			"StopSmokeFollowTest",
-			StopSmokeFollowTest);
-
 		return true;
 	}
 }

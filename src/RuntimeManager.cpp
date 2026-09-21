@@ -3,8 +3,8 @@
 #include "ConfigManager.h"
 #include "GraphManager.h"
 #include "RuntimeAttachment.h"
-#include "SmokeFollowTest.h"
 
+#include <chrono>
 #include <memory>
 
 namespace SmokingGuns
@@ -12,6 +12,7 @@ namespace SmokingGuns
 	namespace
 	{
 		constexpr std::uint64_t kPeriodicReconcileFrames = 15;
+		constexpr auto kReconcileInterval = std::chrono::milliseconds{ 500 };
 
 		struct PlayerUpdateHook
 		{
@@ -22,7 +23,6 @@ namespace SmokingGuns
 				func(a_player, a_delta);
 
 				RuntimeManager::GetSingleton().Update();
-				SmokeFollowTest::OnPlayerUpdate();
 			}
 
 			static inline REL::Relocation<decltype(thunk)> func;
@@ -71,7 +71,7 @@ namespace SmokingGuns
 			return false;
 		}
 
-		forceReconcile = true;
+		forceReconcile.store(true, std::memory_order_relaxed);
 
 		const auto* profile =
 			ConfigManager::GetSingleton().GetWeaponProfile(a_weapon);
@@ -120,7 +120,7 @@ namespace SmokingGuns
 			thirdPersonRefresh = GraphRefreshStage::kClear;
 		}
 
-		// Retry missing graphs on the normal reconciliation cadence, but
+		// Retry missing graphs every 15 player updates, but
 		// advance a successful clear on the next player update for a 0->1 edge.
 		const bool refreshPending =
 			firstPersonRefresh != GraphRefreshStage::kIdle ||
@@ -166,13 +166,14 @@ namespace SmokingGuns
 			}
 		}
 
-		if (!forceReconcile &&
-			(updateCount % kPeriodicReconcileFrames) != 0) {
-
+		const auto now = std::chrono::steady_clock::now();
+		const bool equipHint =
+			forceReconcile.exchange(false, std::memory_order_relaxed);
+		if (!equipHint && now < nextReconcileAt) {
 			return;
 		}
 
-		forceReconcile = false;
+		nextReconcileAt = now + kReconcileInterval;
 
 		auto* player = RE::PlayerCharacter::GetSingleton();
 
@@ -260,16 +261,19 @@ namespace SmokingGuns
 			firstPersonMissing ||
 			thirdPersonMissing) {
 
-			REX::DEBUG(
-				"[Smoking Guns][RuntimeManager] "
-				"Reconciling {:08X}: weaponChanged={}, "
-				"rootsChanged=({}, {}), missing=({}, {})",
-				weapon->GetFormID(),
-				weaponChanged,
-				firstPersonRootChanged,
-				thirdPersonRootChanged,
-				firstPersonMissing,
-				thirdPersonMissing);
+			if (weaponChanged || firstPersonRootChanged ||
+				thirdPersonRootChanged) {
+				REX::DEBUG(
+					"[Smoking Guns][RuntimeManager] "
+					"Reconciling {:08X}: weaponChanged={}, "
+					"rootsChanged=({}, {}), missing=({}, {})",
+					weapon->GetFormID(),
+					weaponChanged,
+					firstPersonRootChanged,
+					thirdPersonRootChanged,
+					firstPersonMissing,
+					thirdPersonMissing);
+			}
 
 			if (firstPersonRoot &&
 				(firstPersonRootChanged || firstPersonMissing || weaponChanged)) {
