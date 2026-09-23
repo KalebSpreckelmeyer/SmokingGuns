@@ -236,12 +236,14 @@ namespace Papyrus
 				weaponData->weight,
 				config.GetAmmoMult(),
 				config.GetWeightMult(),
+				config.GetReferenceWeight(),
 				config.GetOverallMult());
 
 		REX::INFO(
 			"[Smoking Guns] Smoke calculation: "
 			"AmmoImpulse={:.3f}, "
 			"Weight={:.3f}, "
+			"ReferenceWeight={:.3f}, "
 			"WeightImpulse={:.3f}, "
 			"AmmoComponent={:.3f}, "
 			"WeightComponent={:.3f}, "
@@ -249,6 +251,7 @@ namespace Papyrus
 			"SmokeImpulse={:.3f}",
 			ammoImpulse,
 			weaponData->weight,
+			config.GetReferenceWeight(),
 			smokeCalculation.weightImpulse,
 			smokeCalculation.ammoComponent,
 			smokeCalculation.weightComponent,

@@ -18,6 +18,7 @@ namespace SmokingGuns
 			float a_weaponWeight,
 			float a_ammoMult,
 			float a_weightMult,
+			float a_referenceWeight,
 			float a_overallMult);
 	};
 }

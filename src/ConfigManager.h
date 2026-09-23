@@ -38,6 +38,7 @@ namespace SmokingGuns
 
 		[[nodiscard]] float GetAmmoMult() const;
 		[[nodiscard]] float GetWeightMult() const;
+		[[nodiscard]] float GetReferenceWeight() const;
 		[[nodiscard]] float GetOverallMult() const;
 		[[nodiscard]] float GetSmokeDecayImpulse() const;
 
@@ -55,6 +56,7 @@ namespace SmokingGuns
 
 		float ammoMult{ 1.0f };
 		float weightMult{ 1.0f };
+		float referenceWeight{ 5.0f };
 		float overallMult{ 1.0f };
 		float smokeDecayImpulse{ 3.0f };
 

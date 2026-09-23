@@ -9,19 +9,14 @@ namespace SmokingGuns
 		float a_weaponWeight,
 		float a_ammoMult,
 		float a_weightMult,
+		float a_referenceWeight,
 		float a_overallMult)
 	{
 		SmokeCalculationResult result{};
 
-		// Treat a 5 lb weapon as a weight impulse of 1.0.
-		//
-		// This keeps raw Fallout weapon weight from overwhelming
-		// the ammo component.
-		constexpr float referenceWeight = 5.0f;
-
 		result.weightImpulse =
 			std::max(a_weaponWeight, 0.0f) /
-			referenceWeight;
+			std::max(a_referenceWeight, 0.000001f);
 
 		result.ammoComponent =
 			std::max(a_ammoImpulse, 0.0f) *

@@ -24,6 +24,20 @@ The runtime checks for rebuilt or missing effect nodes on an equip hint and roug
 
 The player alias script calls `SGNative.ReportEquipped` when a weapon is equipped and after a save loads with a weapon already equipped. That native call computes `SmokeImpulse` and writes `SmokeImpulse` and `SmokeDecayImpulse` to the weapon graphs. `ReportEquipped` is the only Papyrus function this runtime registers.
 
+## General configuration
+
+General tuning values live in `Data/F4SE/Plugins/SmokingGuns/SmokingGuns.ini`:
+
+```ini
+AmmoMult = 1.0
+WeightMult = 1.0
+ReferenceWeight = 5.0
+OverallMult = 1.0
+SmokeDecayImpulse = 3.0
+```
+
+Weapon weight contributes `max(weapon weight, 0) / ReferenceWeight` before `WeightMult` and `OverallMult` are applied. Increasing `ReferenceWeight` reduces the contribution from weapon weight. The value must be greater than zero; an invalid value leaves the default or previously parsed value unchanged.
+
 ## Weapon Profiles
 
 Weapon profiles live in `Data/F4SE/Plugins/SmokingGuns/Weapons/*.ini`.

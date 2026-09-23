@@ -146,6 +146,11 @@ namespace SmokingGuns
 		return weightMult;
 	}
 
+	float ConfigManager::GetReferenceWeight() const
+	{
+		return referenceWeight;
+	}
+
 	float ConfigManager::GetOverallMult() const
 	{
 		return overallMult;
@@ -221,10 +226,12 @@ namespace SmokingGuns
 				"[Smoking Guns] Using general defaults: "
 				"AmmoMult={:.3f}, "
 				"WeightMult={:.3f}, "
+				"ReferenceWeight={:.3f}, "
 				"OverallMult={:.3f}, "
 				"SmokeDecayImpulse={:.3f}",
 				ammoMult,
 				weightMult,
+				referenceWeight,
 				overallMult,
 				smokeDecayImpulse);
 
@@ -280,6 +287,18 @@ namespace SmokingGuns
 			else if (key == "WeightMult") {
 				weightMult = value;
 			}
+			else if (key == "ReferenceWeight") {
+				if (value > 0.0f) {
+					referenceWeight = value;
+				}
+				else {
+					REX::WARN(
+						"[Smoking Guns] ReferenceWeight must be greater than zero "
+						"on general config line {}: {}",
+						lineNumber,
+						valueText);
+				}
+			}
 			else if (key == "OverallMult") {
 				overallMult = value;
 			}
@@ -298,10 +317,12 @@ namespace SmokingGuns
 			"[Smoking Guns] General config loaded: "
 			"AmmoMult={:.3f}, "
 			"WeightMult={:.3f}, "
+			"ReferenceWeight={:.3f}, "
 			"OverallMult={:.3f}, "
 			"SmokeDecayImpulse={:.3f}",
 			ammoMult,
 			weightMult,
+			referenceWeight,
 			overallMult,
 			smokeDecayImpulse);
 	}
