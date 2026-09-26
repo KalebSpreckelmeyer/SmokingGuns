@@ -23,6 +23,12 @@ namespace SmokingGuns::RuntimeAttachment
 			std::size_t depth{ 0 };
 			std::size_t matchesAtDepth{ 0 };
 			std::string selectedOwner;
+			bool usedOwnerFallback{ false };
+			bool usedGlobalParent{ false };
+			std::size_t globalParentMatches{ 0 };
+			std::string requestedParent;
+			std::string unresolvedParent;
+			std::string unresolvedOwner;
 			std::vector<std::string> competingOwners;
 		};
 
@@ -39,6 +45,8 @@ namespace SmokingGuns::RuntimeAttachment
 		{
 			kMissingLocator,
 			kAmbiguousLocator,
+			kParentFallback,
+			kGlobalParentResolution,
 			kNifLoad
 		};
 
@@ -202,6 +210,42 @@ namespace SmokingGuns::RuntimeAttachment
 				RE::BSFixedString{ a_name.c_str() });
 		}
 
+		std::vector<RE::NiNode*> FindNamedNodes(
+			RE::NiAVObject* a_root,
+			const RE::BSFixedString& a_name)
+		{
+			std::vector<RE::NiNode*> matches;
+			if (!a_root || a_name.empty()) {
+				return matches;
+			}
+
+			std::vector<RE::NiAVObject*> pending{ a_root };
+			while (!pending.empty()) {
+				auto* object = pending.back();
+				pending.pop_back();
+				if (!object) {
+					continue;
+				}
+
+				if (object->name == a_name) {
+					if (auto* node = object->IsNode()) {
+						matches.push_back(node);
+					}
+				}
+
+				if (auto* node = object->IsNode()) {
+					for (auto& child : node->children) {
+						if (child && !std::string_view{ child->name.c_str() }
+							.starts_with(kRuntimePrefix)) {
+							pending.push_back(child.get());
+						}
+					}
+				}
+			}
+
+			return matches;
+		}
+
 		bool IsReachableFromRoot(
 			const RE::NiAVObject* a_root,
 			const RE::NiAVObject* a_object)
@@ -264,10 +308,36 @@ namespace SmokingGuns::RuntimeAttachment
 						}
 
 						RE::NiAVObject* parentObject = owner;
+						bool usedOwnerFallback = false;
+						bool usedGlobalParent = false;
+						std::size_t globalParentMatches = 0;
 
 						if (!point->parent.empty()) {
 							parentObject = owner->GetObjectByName(
 								point->parent);
+
+							if (!parentObject) {
+								auto globalMatches = FindNamedNodes(
+									a_treeRoot, point->parent);
+								globalParentMatches = globalMatches.size();
+								if (globalMatches.size() == 1) {
+									parentObject = globalMatches.front();
+									usedGlobalParent = true;
+								}
+							}
+
+							// Fallout can rename an attached component's source root
+							// to its live P-* slot name while leaving CPA parent strings
+							// unchanged. Prefer a unique exact-name node elsewhere in the
+							// same weapon tree. If none exists, or several make the result
+							// ambiguous, fall back to the component root that owns the CPA.
+							const std::string_view ownerName{ owner->name.c_str() };
+							if (!parentObject && owner->IsNode() && owner->parent &&
+								ownerName.starts_with("P-") &&
+								!ownerName.starts_with(kLocatorPrefix)) {
+								parentObject = owner;
+								usedOwnerFallback = true;
+							}
 						}
 
 						auto* parentNode =
@@ -276,14 +346,10 @@ namespace SmokingGuns::RuntimeAttachment
 							nullptr;
 
 						if (!parentNode) {
-							REX::WARN(
-								"[Smoking Guns][RuntimeAttachment] "
-								"Locator '{}' named parent '{}' was not "
-								"a node in component '{}'",
-								a_attachPoint,
-								point->parent.c_str(),
-								owner->name.c_str());
-
+							if (selected.unresolvedParent.empty()) {
+								selected.unresolvedParent = point->parent.c_str();
+								selected.unresolvedOwner = owner->name.c_str();
+							}
 							continue;
 						}
 
@@ -297,10 +363,16 @@ namespace SmokingGuns::RuntimeAttachment
 						}
 
 						if (!selected.point || parentDepth > selected.depth) {
-							selected = {
-								parentNode, point, parentDepth, 1,
-								owner->name.c_str(), {}
-							};
+							selected.parent = parentNode;
+							selected.point = point;
+							selected.depth = parentDepth;
+							selected.matchesAtDepth = 1;
+							selected.selectedOwner = owner->name.c_str();
+							selected.usedOwnerFallback = usedOwnerFallback;
+							selected.usedGlobalParent = usedGlobalParent;
+							selected.globalParentMatches = globalParentMatches;
+							selected.requestedParent = point->parent.c_str();
+							selected.competingOwners.clear();
 						}
 						else if (parentDepth == selected.depth) {
 							// Equal-depth components are not ordered by
@@ -521,15 +593,73 @@ namespace SmokingGuns::RuntimeAttachment
 				++result.locatorMissing;
 				if (ReportIssueOnce(a_treeRoot, requirement.attachPoint,
 					IssueKind::kMissingLocator)) {
-					REX::WARN(
-						"[Smoking Guns][RuntimeAttachment] "
-						"{} locator '{}' was not found in the live tree",
-						a_treeLabel, requirement.attachPoint);
+					if (!located.unresolvedParent.empty()) {
+						REX::WARN(
+							"[Smoking Guns][RuntimeAttachment] "
+							"{} locator '{}' named parent '{}' was not a node "
+							"in component '{}'",
+							a_treeLabel, requirement.attachPoint,
+							located.unresolvedParent,
+							located.unresolvedOwner);
+					}
+					else {
+						REX::WARN(
+							"[Smoking Guns][RuntimeAttachment] "
+							"{} locator '{}' was not found in the live tree",
+							a_treeLabel, requirement.attachPoint);
+					}
 				}
 				continue;
 			}
 			ClearIssue(a_treeRoot, requirement.attachPoint,
 				IssueKind::kMissingLocator);
+
+			if (located.usedOwnerFallback) {
+				if (ReportIssueOnce(a_treeRoot, requirement.attachPoint,
+					IssueKind::kParentFallback)) {
+					if (located.globalParentMatches > 1) {
+						REX::WARN(
+							"[Smoking Guns][RuntimeAttachment] "
+							"{} locator '{}' named parent '{}' was absent beneath "
+							"component '{}' and had {} global matches; using the "
+							"component root",
+							a_treeLabel, requirement.attachPoint,
+							located.requestedParent,
+							located.selectedOwner,
+							located.globalParentMatches);
+					}
+					else {
+						REX::WARN(
+							"[Smoking Guns][RuntimeAttachment] "
+							"{} locator '{}' named parent '{}' was absent beneath "
+							"component '{}' and was not found elsewhere; using the "
+							"component root",
+							a_treeLabel, requirement.attachPoint,
+							located.requestedParent,
+							located.selectedOwner);
+					}
+				}
+			}
+			if (!located.usedOwnerFallback) {
+				ClearIssue(a_treeRoot, requirement.attachPoint,
+					IssueKind::kParentFallback);
+			}
+
+			if (located.usedGlobalParent &&
+				ReportIssueOnce(a_treeRoot, requirement.attachPoint,
+					IssueKind::kGlobalParentResolution)) {
+				REX::INFO(
+					"[Smoking Guns][RuntimeAttachment] "
+					"{} locator '{}' resolved named parent '{}' globally "
+					"outside component '{}'",
+					a_treeLabel, requirement.attachPoint,
+					located.requestedParent,
+					located.selectedOwner);
+			}
+			if (!located.usedGlobalParent) {
+				ClearIssue(a_treeRoot, requirement.attachPoint,
+					IssueKind::kGlobalParentResolution);
+			}
 
 			if (located.matchesAtDepth > 1 &&
 				ReportIssueOnce(a_treeRoot, requirement.attachPoint,

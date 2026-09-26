@@ -4,8 +4,11 @@
 #include "GraphManager.h"
 #include "RuntimeAttachment.h"
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <memory>
+#include <string>
 
 namespace SmokingGuns
 {
@@ -13,6 +16,50 @@ namespace SmokingGuns
 	{
 		constexpr std::uint64_t kPeriodicReconcileFrames = 15;
 		constexpr auto kReconcileInterval = std::chrono::milliseconds{ 500 };
+
+		bool IsSuppressorKeyword(const RE::BGSKeyword* a_keyword)
+		{
+			if (!a_keyword) {
+				return false;
+			}
+
+			std::string editorID{ a_keyword->formEditorID.c_str() };
+			std::ranges::transform(
+				editorID,
+				editorID.begin(),
+				[](unsigned char a_character) {
+					return static_cast<char>(std::tolower(a_character));
+				});
+
+			if (editorID == "dn_hasmuzzle_suppressor" ||
+				editorID == "hassilencer") {
+				return true;
+			}
+
+			const auto hasPosition = editorID.find("has");
+			const auto suppressorPosition = editorID.find("suppressor");
+			const auto silencerPosition = editorID.find("silencer");
+
+			return hasPosition != std::string::npos &&
+				((suppressorPosition != std::string::npos &&
+					hasPosition < suppressorPosition) ||
+				(silencerPosition != std::string::npos &&
+					hasPosition < silencerPosition));
+		}
+
+		bool HasSuppressor(
+			const RE::TESObjectWEAP* a_weapon,
+			const RE::TBO_InstanceData* a_instanceData)
+		{
+			if (!a_weapon) {
+				return false;
+			}
+
+			RE::BSScrapArray<const RE::BGSKeyword*> keywords;
+			a_weapon->CollectAllKeywords(keywords, a_instanceData);
+
+			return std::ranges::any_of(keywords, IsSuppressorKeyword);
+		}
 
 		struct PlayerUpdateHook
 		{
@@ -86,7 +133,8 @@ namespace SmokingGuns
 	}
 
 	RE::TESObjectWEAP* RuntimeManager::ResolveEquippedWeapon(
-		RE::PlayerCharacter* a_player) const
+		RE::PlayerCharacter* a_player,
+		RE::BSTSmartPointer<RE::TBO_InstanceData>& a_instanceData) const
 	{
 		if (!a_player) {
 			return nullptr;
@@ -105,7 +153,12 @@ namespace SmokingGuns
 			return nullptr;
 		}
 
-		return equipped.object->As<RE::TESObjectWEAP>();
+		auto* weapon = equipped.object->As<RE::TESObjectWEAP>();
+		if (weapon) {
+			a_instanceData = equipped.instanceData;
+		}
+
+		return weapon;
 	}
 
 	void RuntimeManager::Update()
@@ -181,11 +234,13 @@ namespace SmokingGuns
 			return;
 		}
 
-		auto* weapon = ResolveEquippedWeapon(player);
+		RE::BSTSmartPointer<RE::TBO_InstanceData> instanceData;
+		auto* weapon = ResolveEquippedWeapon(player, instanceData);
 
 		if (!weapon) {
 			RuntimeAttachment::ReleaseRetainedAttachments();
 			observedWeaponFormID = 0;
+			observedSuppressorState = -1;
 			observedFirstPersonRoot = nullptr;
 			observedThirdPersonRoot = nullptr;
 			return;
@@ -193,6 +248,29 @@ namespace SmokingGuns
 
 		const auto* profile =
 			ConfigManager::GetSingleton().GetWeaponProfile(weapon);
+		const bool weaponChanged =
+			observedWeaponFormID != weapon->GetFormID();
+
+		const bool hasSuppressor =
+			HasSuppressor(weapon, instanceData.get());
+		const auto suppressorValue =
+			static_cast<std::int8_t>(hasSuppressor ? 1 : 0);
+		const bool suppressorChanged =
+			observedSuppressorState != suppressorValue;
+		const auto suppressorWrite = GraphManager::SetIntVariable(
+			player, "SG_HasSuppressor", suppressorValue);
+
+		if (weaponChanged || suppressorChanged) {
+			REX::INFO(
+				"[Smoking Guns][RuntimeManager] "
+				"SG_HasSuppressor={} for {:08X}; graph writes 1P={}, 3P={}",
+				suppressorValue,
+				weapon->GetFormID(),
+				suppressorWrite.firstPersonWritten,
+				suppressorWrite.thirdPersonWritten);
+		}
+
+		observedSuppressorState = suppressorValue;
 
 		// Write both flags on every reconciliation tick. Graphs may be rebuilt
 		// while the weapon FormID and player roots remain unchanged.
@@ -215,9 +293,6 @@ namespace SmokingGuns
 
 		auto* firstPersonRoot = player->Get3D(true);
 		auto* thirdPersonRoot = player->Get3D(false);
-
-		const bool weaponChanged =
-			observedWeaponFormID != weapon->GetFormID();
 
 		if (weaponChanged) {
 			REX::INFO(

@@ -23,7 +23,8 @@ namespace SmokingGuns
 		RuntimeManager() = default;
 
 		RE::TESObjectWEAP* ResolveEquippedWeapon(
-			RE::PlayerCharacter* a_player) const;
+			RE::PlayerCharacter* a_player,
+			RE::BSTSmartPointer<RE::TBO_InstanceData>& a_instanceData) const;
 
 		enum class GraphRefreshStage
 		{
@@ -38,6 +39,7 @@ namespace SmokingGuns
 		GraphRefreshStage thirdPersonRefresh{ GraphRefreshStage::kIdle };
 
 		std::uint32_t observedWeaponFormID{ 0 };
+		std::int8_t observedSuppressorState{ -1 };
 		const RE::NiAVObject* observedFirstPersonRoot{ nullptr };
 		const RE::NiAVObject* observedThirdPersonRoot{ nullptr };
 
